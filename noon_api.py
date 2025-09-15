@@ -23,7 +23,8 @@ def scrape():
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=True)
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
-        extraction_strategy=extraction_strategy
+        extraction_strategy=extraction_strategy,
+        scan_full_page= True
     )
     browser_config = BrowserConfig(
         viewport_width=1920,
