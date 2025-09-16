@@ -33,11 +33,13 @@ def scrape():
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=True)
     config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        extraction_strategy=extraction_strategy,
-        scan_full_page=True
-        # No wait_until specified — uses default behavior
-    )
+    cache_mode=CacheMode.BYPASS,
+    extraction_strategy=extraction_strategy,
+    scan_full_page=True,
+    wait_until="networkidle",           # Waits for all JS and network activity to settle
+    delay_after_load_ms=1000            # Optional: adds 1 second buffer after load
+)
+
 
     async def run_scraper():
         async with AsyncWebCrawler(config=browser_config, verbose=True) as crawler:
