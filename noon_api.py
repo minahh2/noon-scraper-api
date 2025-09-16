@@ -36,7 +36,6 @@ def scrape():
     cache_mode=CacheMode.BYPASS,
     extraction_strategy=extraction_strategy,
     scan_full_page=True,
-    wait_until="networkidle",           # Waits for all JS and network activity to settle
     delay_before_return_html=1            # Optional: adds 1 second buffer after load
 )
 
