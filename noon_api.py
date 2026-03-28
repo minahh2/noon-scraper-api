@@ -31,16 +31,29 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input"}), 400
 
-    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    config = CrawlerRunConfig(
-    cache_mode=CacheMode.BYPASS,
-    extraction_strategy=extraction_strategy,
-    scan_full_page=True,
-    scroll_delay=1.0,    
-    magic=True,
-    simulate_user=True  
-)
+    # JavaScript snippet to find and click the element
+    js_click_script = """
+    const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
+    for (let el of elements) {
+        let hasClass = Array.from(el.classList).some(className => className.endsWith('_slidingOptionsTriggerContainer'));
+        if (hasClass) {
+            el.click();
+            break; // Remove this break if you want to click ALL matching elements on the page
+        }
+    }
+    """
 
+    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
+    
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        extraction_strategy=extraction_strategy,
+        js_code=[js_click_script], # Pass the JavaScript here
+        scan_full_page=True,
+        scroll_delay=0.3,    
+        magic=True,
+        simulate_user=True  
+    )
 
     async def run_scraper():
         async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
