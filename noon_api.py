@@ -31,19 +31,19 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input"}), 400
 
-    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=True)
+    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
     config = CrawlerRunConfig(
     cache_mode=CacheMode.BYPASS,
     extraction_strategy=extraction_strategy,
     scan_full_page=True,
-    scroll_delay=0.3,    
+    scroll_delay=1.0,    
     magic=True,
-    simulate_user=True    
+    simulate_user=True  
 )
 
 
     async def run_scraper():
-        async with AsyncWebCrawler(config=browser_config, verbose=True) as crawler:
+        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
             results = await crawler.arun_many(urls=urls, config=config)
             output = []
             for result in results:
