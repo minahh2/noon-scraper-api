@@ -81,7 +81,7 @@ async def scrape():
         js_code=[JS_CLICK_SCRIPT],
         
         # Smart waiting instead of fixed delays
-        wait_for=buy_box_wait_selector, 
+        #wait_for=buy_box_wait_selector, 
         
         # Performance Targeting & Exclusions
         css_selector=main_content_selector,
@@ -92,7 +92,7 @@ async def scrape():
         
         # Crawler Behavior Settings
         screenshot=False, # Disabled for speed
-        scan_full_page=False, 
+        scan_full_page=True, 
         magic=True,
         simulate_user=True,
         page_timeout=30000 
