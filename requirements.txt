@@ -1,3 +1,4 @@
 flask
 crawl4ai
+asgiref
 playwright
