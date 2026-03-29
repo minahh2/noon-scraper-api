@@ -11,7 +11,7 @@ from crawl4ai import (
 
 app = Flask(__name__)
 
-# GLOBAL BROWSER CONFIG
+# GLOBAL BROWSER CONFIG: Optimized for production/Coolify memory limits
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
@@ -23,12 +23,12 @@ browser_config = BrowserConfig(
         "--no-sandbox", 
         "--disable-gpu", 
         "--disable-extensions",
-        "--disable-dev-shm-usage",
+        "--disable-dev-shm-usage", 
         "--js-flags=--max-old-space-size=512" 
     ]
 )
 
-# JAVASCRIPT SPOOFING
+# JAVASCRIPT SPOOFING: Forces the dynamic React panel to load data
 JS_CLICK_SCRIPT = """
 const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
 for (let el of elements) {
@@ -58,7 +58,7 @@ for (let el of elements) {
 async def scrape():
     data = request.get_json()
     
-    # Safety check to prevent NoneType errors if JSON isn't passed correctly
+    # Safety check to prevent Flask crashes if payload is missing
     if not data:
          return jsonify({"error": "No JSON payload received"}), 400
          
@@ -70,14 +70,29 @@ async def scrape():
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
-    # --- DEBUG CONFIGURATION ---
+    # --- CSS SELECTORS ---
+    buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
+    main_content_selector = '[class^="ProductDetailsDesktop"]'
+
+    # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
-        screenshot=True, # Takes a picture to see if we are blocked
-        scan_full_page=True, # Let it load naturally for the debug test
+        # Smart waiting instead of fixed delays
+        wait_for=buy_box_wait_selector, 
+        
+        # Performance Targeting & Exclusions
+        css_selector=main_content_selector,
+        excluded_tags=['nav', 'footer', 'header', 'aside', 'script', 'style', 'noscript'],
+        exclude_external_links=True,
+        exclude_social_media_links=True,
+        exclude_external_images=True,
+        
+        # Crawler Behavior Settings
+        screenshot=False, # Disabled for speed
+        scan_full_page=False, 
         magic=True,
         simulate_user=True,
         page_timeout=30000 
@@ -95,26 +110,24 @@ async def scrape():
                     except Exception:
                         extracted = {"error": "Failed to parse extracted content"}
                     
+                    # Clean return object (No HTML strings or screenshots)
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted,
-                        "html_preview": result.html[:500] if result.html else "NO HTML",
-                        "screenshot": result.screenshot 
+                        "data": extracted
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message,
-                        "html_preview": result.html[:500] if result.html else "NO HTML"
+                        "error": result.error_message
                     })
             return output
 
-    # --- THIS IS THE BLOCK THAT WAS MISSING ---
+    # --- PROPER ERROR HANDLING AND RETURN BLOCK ---
     try:
         result = await asyncio.wait_for(run_scraper(), timeout=90) 
-        return jsonify(result) # This actually sends the data back to n8n
+        return jsonify(result) 
     except asyncio.TimeoutError:
         return jsonify({"error": "Overall scraping process timed out"}), 504
     except Exception as e:
