@@ -85,7 +85,7 @@ async def scrape():
         
         # Performance Targeting & Exclusions
         #css_selector=main_content_selector,
-        excluded_tags=['nav', 'footer', 'header', 'aside', 'script', 'style', 'noscript'],
+        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
