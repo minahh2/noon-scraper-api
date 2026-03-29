@@ -36,9 +36,34 @@ def scrape():
     const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
     for (let el of elements) {
         let hasClass = Array.from(el.classList).some(className => className.endsWith('_slidingOptionsTriggerContainer'));
-        if (hasClass) {
-            el.click();
-            break; // Remove this break if you want to click ALL matching elements on the page
+        let isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
+
+        if (hasClass && isVisible) {
+            // Calculate the exact center of the element on the screen
+            const rect = el.getBoundingClientRect();
+            const x = rect.left + (rect.width / 2);
+            const y = rect.top + (rect.height / 2);
+
+            // Fire the sequence with exact physical screen coordinates
+            const eventTypes = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
+            
+            eventTypes.forEach(eventType => {
+                const event = new MouseEvent(eventType, {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    buttons: 1,
+                    clientX: x,
+                    clientY: y,
+                    screenX: x,
+                    screenY: y
+                });
+                // Sometimes React attaches the listener to the first child inside the container
+                let target = el.firstElementChild ? el.firstElementChild : el;
+                target.dispatchEvent(event);
+            });
+            
+            break; 
         }
     }
     """
