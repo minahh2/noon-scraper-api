@@ -95,7 +95,7 @@ async def scrape():
         scan_full_page=False, 
         magic=True,
         simulate_user=True,
-        page_timeout=30000 
+        page_timeout=60000 
     )
 
     async def run_scraper():
