@@ -11,7 +11,7 @@ from crawl4ai import (
 
 app = Flask(__name__)
 
-# GLOBAL BROWSER CONFIG: Optimized for Docker/Coolify memory limits
+# GLOBAL BROWSER CONFIG
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
@@ -23,12 +23,12 @@ browser_config = BrowserConfig(
         "--no-sandbox", 
         "--disable-gpu", 
         "--disable-extensions",
-        "--disable-dev-shm-usage", # Crucial for Coolify/Docker stability
+        "--disable-dev-shm-usage",
         "--js-flags=--max-old-space-size=512" 
     ]
 )
 
-# JAVASCRIPT SPOOFING: Forces the dynamic React panel to load data
+# JAVASCRIPT SPOOFING
 JS_CLICK_SCRIPT = """
 const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
 for (let el of elements) {
@@ -57,6 +57,11 @@ for (let el of elements) {
 @app.route('/scrape', methods=['POST'])
 async def scrape():
     data = request.get_json()
+    
+    # Safety check to prevent NoneType errors if JSON isn't passed correctly
+    if not data:
+         return jsonify({"error": "No JSON payload received"}), 400
+         
     urls = data.get("urls")
     schema = data.get("schema")
 
@@ -64,26 +69,15 @@ async def scrape():
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    
-    # CSS Selectors
-    buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
-    main_content_selector = '[class^="ProductDetailsDesktop"]'
 
-   # Temporarily comment out the strict wait and css selectors
-    # buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
-    # main_content_selector = '[class^="ProductDetailsDesktop"]'
-
+    # --- DEBUG CONFIGURATION ---
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
-        # --- DEBUG MODE ---
-        screenshot=True, # Takes a picture of the page
-        # wait_for=buy_box_wait_selector, # Disabled for debugging
-        # css_selector=main_content_selector, # Disabled for debugging
-        
-        scan_full_page=True, # Let it load everything for the test
+        screenshot=True, # Takes a picture to see if we are blocked
+        scan_full_page=True, # Let it load naturally for the debug test
         magic=True,
         simulate_user=True,
         page_timeout=30000 
@@ -105,9 +99,8 @@ async def scrape():
                         "url": result.url, 
                         "status": result.status_code, 
                         "data": extracted,
-                        # --- NEW DEBUG INFO ---
                         "html_preview": result.html[:500] if result.html else "NO HTML",
-                        "screenshot": result.screenshot # This will be a massive Base64 string
+                        "screenshot": result.screenshot 
                     })
                 else:
                     output.append({
@@ -117,5 +110,15 @@ async def scrape():
                         "html_preview": result.html[:500] if result.html else "NO HTML"
                     })
             return output
+
+    # --- THIS IS THE BLOCK THAT WAS MISSING ---
+    try:
+        result = await asyncio.wait_for(run_scraper(), timeout=90) 
+        return jsonify(result) # This actually sends the data back to n8n
+    except asyncio.TimeoutError:
+        return jsonify({"error": "Overall scraping process timed out"}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
