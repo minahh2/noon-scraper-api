@@ -1,4 +1,3 @@
-flask
+Flask[async]
 crawl4ai
-asgiref
 playwright
