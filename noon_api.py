@@ -76,7 +76,8 @@ async def scrape():
 
     # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
+        #cache_mode=CacheMode.BYPASS,
+        cache_mode=CacheMode.ENABLED,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
