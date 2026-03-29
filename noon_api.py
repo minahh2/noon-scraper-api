@@ -84,7 +84,7 @@ async def scrape():
         #wait_for=buy_box_wait_selector, 
         
         # Performance Targeting & Exclusions
-        css_selector=main_content_selector,
+        #css_selector=main_content_selector,
         excluded_tags=['nav', 'footer', 'header', 'aside', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
