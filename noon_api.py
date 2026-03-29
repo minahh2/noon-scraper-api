@@ -92,7 +92,8 @@ async def scrape():
         
         # Crawler Behavior Settings
         screenshot=False, # Disabled for speed
-        scan_full_page=True, 
+        scan_full_page=True,
+        scroll_delay=0.3,
         magic=True,
         simulate_user=True,
         page_timeout=180000 
