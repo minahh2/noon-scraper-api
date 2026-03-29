@@ -72,7 +72,7 @@ async def scrape():
 
     # --- CSS SELECTORS ---
     buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
-    main_content_selector = '[class^="ProductDetailsDesktop"]'
+    main_content_selector = '[data-qa="pdp-container"]'
 
     # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
