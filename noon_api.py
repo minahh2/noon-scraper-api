@@ -1,4 +1,75 @@
-# Temporarily comment out the strict wait and css selectors
+import json
+import asyncio
+from flask import Flask, request, jsonify
+from crawl4ai import (
+    AsyncWebCrawler,
+    CrawlerRunConfig,
+    JsonCssExtractionStrategy,
+    BrowserConfig,
+    CacheMode
+)
+
+app = Flask(__name__)
+
+# GLOBAL BROWSER CONFIG: Optimized for Docker/Coolify memory limits
+browser_config = BrowserConfig(
+    viewport_width=1920,
+    viewport_height=1080,
+    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    user_agent_mode="random",
+    text_mode=True, 
+    light_mode=True,
+    extra_args=[
+        "--no-sandbox", 
+        "--disable-gpu", 
+        "--disable-extensions",
+        "--disable-dev-shm-usage", # Crucial for Coolify/Docker stability
+        "--js-flags=--max-old-space-size=512" 
+    ]
+)
+
+# JAVASCRIPT SPOOFING: Forces the dynamic React panel to load data
+JS_CLICK_SCRIPT = """
+const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
+for (let el of elements) {
+    let hasClass = Array.from(el.classList).some(className => className.endsWith('_slidingOptionsTriggerContainer'));
+    let isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
+
+    if (hasClass && isVisible) {
+        const rect = el.getBoundingClientRect();
+        const x = rect.left + (rect.width / 2);
+        const y = rect.top + (rect.height / 2);
+
+        const eventTypes = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
+        eventTypes.forEach(eventType => {
+            const event = new MouseEvent(eventType, {
+                view: window, bubbles: true, cancelable: true, buttons: 1,
+                clientX: x, clientY: y, screenX: x, screenY: y
+            });
+            let target = el.firstElementChild ? el.firstElementChild : el;
+            target.dispatchEvent(event);
+        });
+        break; 
+    }
+}
+"""
+
+@app.route('/scrape', methods=['POST'])
+async def scrape():
+    data = request.get_json()
+    urls = data.get("urls")
+    schema = data.get("schema")
+
+    if not isinstance(urls, list) or not isinstance(schema, dict):
+        return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
+
+    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
+    
+    # CSS Selectors
+    buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
+    main_content_selector = '[class^="ProductDetailsDesktop"]'
+
+   # Temporarily comment out the strict wait and css selectors
     # buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
     # main_content_selector = '[class^="ProductDetailsDesktop"]'
 
@@ -46,3 +117,5 @@
                         "html_preview": result.html[:500] if result.html else "NO HTML"
                     })
             return output
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, threaded=True)
