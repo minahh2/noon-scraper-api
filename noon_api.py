@@ -71,7 +71,7 @@ async def scrape():
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
     # --- CSS SELECTORS ---
-    buy_box_wait_selector = '[class^="SupportDetailsV2"][class$="_actionList"] [class^="AddToCartWithQuanityV2"]'
+    buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
     main_content_selector = '[data-qa="pdp-container"]'
 
     # --- PRODUCTION CONFIGURATION ---
@@ -92,8 +92,8 @@ async def scrape():
         
         # Crawler Behavior Settings
         screenshot=False, # Disabled for speed
-        scan_full_page=True,
-        scroll_delay=0.3,
+        scan_full_page=False,
+        #scroll_delay=0.3,
         magic=True,
         simulate_user=True,
         page_timeout=180000 
