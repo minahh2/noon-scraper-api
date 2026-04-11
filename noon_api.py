@@ -19,6 +19,7 @@ browser_config = BrowserConfig(
     user_agent_mode="random",
     text_mode=True, 
     light_mode=True,
+    user_data_dir="/app/chrome_cache",
     extra_args=[
         "--no-sandbox", 
         "--disable-gpu", 
