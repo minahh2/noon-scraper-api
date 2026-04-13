@@ -20,12 +20,15 @@ browser_config = BrowserConfig(
     text_mode=True, 
     light_mode=True,
     user_data_dir="/app/chrome_cache",
+    use_persistent_context=True,
     extra_args=[
         "--no-sandbox", 
         "--disable-gpu", 
         "--disable-extensions",
         "--disable-dev-shm-usage", 
-        "--js-flags=--max-old-space-size=512" 
+        "--js-flags=--max-old-space-size=512",
+        "--blink-settings=imagesEnabled=false", # The biggest speed boost
+        "--disable-features=IsolateOrigins,site-per-process",
     ]
 )
 
@@ -77,8 +80,9 @@ async def scrape():
 
     # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
-        #cache_mode=CacheMode.BYPASS,
-        cache_mode=CacheMode.ENABLED,
+        cache_mode=CacheMode.BYPASS,
+        #cache_mode=CacheMode.ENABLED,
+        session_id="noon_daily_scrape", # Just one session is perfectly fine now!
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
