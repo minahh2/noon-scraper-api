@@ -12,6 +12,21 @@ from crawl4ai import (
 app = Flask(__name__)
 
 # GLOBAL BROWSER CONFIG: Optimized for production/Coolify memory limits
+# Create a string of the heaviest e-commerce trackers to block
+# MAP [domain] 127.0.0.1 instantly kills the request at the DNS level
+tracker_blackhole = (
+    "MAP *.google-analytics.com 127.0.0.1, "
+    "MAP *.googletagmanager.com 127.0.0.1, "
+    "MAP *.doubleclick.net 127.0.0.1, "  # <-- Added your DoubleClick block!
+    "MAP *.facebook.net 127.0.0.1, "
+    "MAP *.facebook.com 127.0.0.1, "
+    "MAP *.criteo.com 127.0.0.1, "
+    "MAP *.criteo.net 127.0.0.1, "
+    "MAP *.tiktok.com 127.0.0.1, "
+    "MAP *.snapchat.com 127.0.0.1, "
+    "MAP *.hotjar.com 127.0.0.1, "
+    "MAP *.clarity.ms 127.0.0.1"
+)
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
@@ -29,6 +44,7 @@ browser_config = BrowserConfig(
         "--js-flags=--max-old-space-size=512",
         "--blink-settings=imagesEnabled=false", # The biggest speed boost
         "--disable-features=IsolateOrigins,site-per-process",
+        f"--host-rules={tracker_blackhole}"
     ]
 )
 
