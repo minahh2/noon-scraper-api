@@ -82,7 +82,7 @@ async def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         #cache_mode=CacheMode.ENABLED,
-        session_id="noon_daily_scrape", # Just one session is perfectly fine now!
+        session_id="n_daily_01", # Just one session is perfectly fine now!
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
