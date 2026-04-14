@@ -11,13 +11,15 @@ from crawl4ai import (
 
 app = Flask(__name__)
 
+# --- NEW: GLOBAL COUNTERS FOR SESSION ROTATION ---
+request_counter = 0
+current_session_batch = 1
+
 # GLOBAL BROWSER CONFIG: Optimized for production/Coolify memory limits
-# Create a string of the heaviest e-commerce trackers to block
-# MAP [domain] 127.0.0.1 instantly kills the request at the DNS level
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
     "MAP *.googletagmanager.com 127.0.0.1, "
-    "MAP *.doubleclick.net 127.0.0.1, "  # <-- Added your DoubleClick block!
+    "MAP *.doubleclick.net 127.0.0.1, "  
     "MAP *.facebook.net 127.0.0.1, "
     "MAP *.facebook.com 127.0.0.1, "
     "MAP *.criteo.com 127.0.0.1, "
@@ -27,6 +29,7 @@ tracker_blackhole = (
     "MAP *.hotjar.com 127.0.0.1, "
     "MAP *.clarity.ms 127.0.0.1"
 )
+
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
@@ -42,7 +45,7 @@ browser_config = BrowserConfig(
         "--disable-extensions",
         "--disable-dev-shm-usage", 
         "--js-flags=--max-old-space-size=512",
-        "--blink-settings=imagesEnabled=false", # The biggest speed boost
+        "--blink-settings=imagesEnabled=false", 
         "--disable-features=IsolateOrigins,site-per-process",
         f"--host-rules={tracker_blackhole}"
     ]
@@ -76,6 +79,9 @@ for (let el of elements) {
 
 @app.route('/scrape', methods=['POST'])
 async def scrape():
+    # Bring in the global variables so we can modify them
+    global request_counter, current_session_batch
+
     data = request.get_json()
     
     # Safety check to prevent Flask crashes if payload is missing
@@ -88,6 +94,19 @@ async def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
+    # --- SESSION ROTATION LOGIC ---
+    # Add the number of URLs in this request to our counter
+    request_counter += len(urls)
+    
+    # If we have processed more than 50 URLs, rotate to a fresh session!
+    if request_counter > 50:
+        current_session_batch += 1
+        request_counter = len(urls) # Reset the counter, carrying over the current batch size
+        print(f"🔄 Rotating to new session batch: n_daily_{current_session_batch:02d}")
+
+    # Generate the dynamic session string (e.g., n_daily_01, n_daily_02)
+    dynamic_session_id = f"n_daily_{current_session_batch:02d}"
+
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
     # --- CSS SELECTORS ---
@@ -97,8 +116,10 @@ async def scrape():
     # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
-        #cache_mode=CacheMode.ENABLED,
-        session_id="n_daily_01", # Just one session is perfectly fine now!
+        
+        # USE THE DYNAMIC SESSION ID HERE
+        session_id=dynamic_session_id, 
+        
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         
@@ -106,16 +127,14 @@ async def scrape():
         wait_for=buy_box_wait_selector, 
         
         # Performance Targeting & Exclusions
-        #css_selector=main_content_selector,
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
         
         # Crawler Behavior Settings
-        screenshot=False, # Disabled for speed
+        screenshot=False, 
         scan_full_page=False,
-        #scroll_delay=0.3,
         magic=True,
         simulate_user=True,
         page_timeout=180000 
@@ -133,7 +152,7 @@ async def scrape():
                     except Exception:
                         extracted = {"error": "Failed to parse extracted content"}
                     
-                    # Clean return object (No HTML strings or screenshots)
+                    # Clean return object
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
@@ -149,6 +168,7 @@ async def scrape():
 
     # --- PROPER ERROR HANDLING AND RETURN BLOCK ---
     try:
+        # Note: If your array of URLs is very large (e.g., 10+), you might need to increase this 90-second timeout
         result = await asyncio.wait_for(run_scraper(), timeout=90) 
         return jsonify(result) 
     except asyncio.TimeoutError:
