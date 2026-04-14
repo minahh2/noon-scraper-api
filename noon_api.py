@@ -38,7 +38,7 @@ browser_config = BrowserConfig(
     text_mode=True, 
     light_mode=True,
     user_data_dir="/app/chrome_cache",
-    use_persistent_context=True,
+    use_persistent_context=False,
     extra_args=[
         "--no-sandbox", 
         "--disable-gpu", 
