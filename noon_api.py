@@ -118,7 +118,7 @@ async def scrape():
         cache_mode=CacheMode.BYPASS,
         
         # USE THE DYNAMIC SESSION ID HERE
-        session_id=dynamic_session_id, 
+        #session_id=dynamic_session_id, 
         
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
