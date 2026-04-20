@@ -176,5 +176,17 @@ async def scrape():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+#if __name__ == '__main__':
+    #app.run(host='0.0.0.0', port=5000, threaded=True)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    # REMOVE the Flask dev server:
+    # app.run(host='0.0.0.0', port=5000, threaded=True)
+    
+    # ADD the Waitress production server:
+    from waitress import serve
+    print("🚀 Starting production server with Waitress (Max 4 threads)...")
+    
+    # This strictly limits the server to 4 concurrent threads. 
+    # If n8n sends a 5th request, it simply waits in a queue safely instead of crashing the server.
+    serve(app, host='0.0.0.0', port=5000, threads=4)
