@@ -11,7 +11,6 @@ from crawl4ai import (
 
 app = Flask(__name__)
 
-# GLOBAL BROWSER CONFIG: Optimized for production/Coolify memory limits
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
     "MAP *.googletagmanager.com 127.0.0.1, "
@@ -47,7 +46,6 @@ browser_config = BrowserConfig(
     ]
 )
 
-# JAVASCRIPT SPOOFING: Forces the dynamic React panel to load data
 JS_CLICK_SCRIPT = """
 const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
 for (let el of elements) {
@@ -74,7 +72,7 @@ for (let el of elements) {
 """
 
 @app.route('/scrape', methods=['POST'])
-def scrape(): # <--- 1. MADE SYNCHRONOUS
+def scrape():
     data = request.get_json()
     
     if not data:
@@ -87,23 +85,17 @@ def scrape(): # <--- 1. MADE SYNCHRONOUS
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-
-    # --- CSS SELECTORS ---
     buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
 
-    # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         wait_for=buy_box_wait_selector, 
-        
-        # Performance Targeting & Exclusions
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
-        
         screenshot=False, 
         scan_full_page=False,
         magic=True,
@@ -136,16 +128,12 @@ def scrape(): # <--- 1. MADE SYNCHRONOUS
                     })
             return output
 
-    # --- 2. THE ZOMBIE KILLER FIX ---
+    # --- THE CLEAN EXECUTION FIX ---
     try:
-        # Wrap asyncio.wait_for inside asyncio.run() to ensure garbage collection
-        result = asyncio.run(asyncio.wait_for(run_scraper(), timeout=90))
+        result = asyncio.run(run_scraper())
         return jsonify(result) 
-    except asyncio.TimeoutError:
-        return jsonify({"error": "Overall scraping process timed out"}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == '__main__':
     from waitress import serve
