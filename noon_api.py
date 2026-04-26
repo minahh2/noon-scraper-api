@@ -11,10 +11,6 @@ from crawl4ai import (
 
 app = Flask(__name__)
 
-# --- NEW: GLOBAL COUNTERS FOR SESSION ROTATION ---
-request_counter = 0
-current_session_batch = 1
-
 # GLOBAL BROWSER CONFIG: Optimized for production/Coolify memory limits
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
@@ -78,13 +74,9 @@ for (let el of elements) {
 """
 
 @app.route('/scrape', methods=['POST'])
-async def scrape():
-    # Bring in the global variables so we can modify them
-    global request_counter, current_session_batch
-
+def scrape(): # <--- 1. MADE SYNCHRONOUS
     data = request.get_json()
     
-    # Safety check to prevent Flask crashes if payload is missing
     if not data:
          return jsonify({"error": "No JSON payload received"}), 400
          
@@ -94,36 +86,16 @@ async def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
-    # --- SESSION ROTATION LOGIC ---
-    # Add the number of URLs in this request to our counter
-    request_counter += len(urls)
-    
-    # If we have processed more than 50 URLs, rotate to a fresh session!
-    if request_counter > 50:
-        current_session_batch += 1
-        request_counter = len(urls) # Reset the counter, carrying over the current batch size
-        print(f"🔄 Rotating to new session batch: n_daily_{current_session_batch:02d}")
-
-    # Generate the dynamic session string (e.g., n_daily_01, n_daily_02)
-    dynamic_session_id = f"n_daily_{current_session_batch:02d}"
-
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
     # --- CSS SELECTORS ---
     buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
-    main_content_selector = '[data-qa="pdp-container"]'
 
     # --- PRODUCTION CONFIGURATION ---
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
-        
-        # USE THE DYNAMIC SESSION ID HERE
-        #session_id=dynamic_session_id, 
-        
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
-        
-        # Smart waiting instead of fixed delays
         wait_for=buy_box_wait_selector, 
         
         # Performance Targeting & Exclusions
@@ -132,7 +104,6 @@ async def scrape():
         exclude_social_media_links=True,
         exclude_external_images=True,
         
-        # Crawler Behavior Settings
         screenshot=False, 
         scan_full_page=False,
         magic=True,
@@ -152,7 +123,6 @@ async def scrape():
                     except Exception:
                         extracted = {"error": "Failed to parse extracted content"}
                     
-                    # Clean return object
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
@@ -166,27 +136,18 @@ async def scrape():
                     })
             return output
 
-    # --- PROPER ERROR HANDLING AND RETURN BLOCK ---
+    # --- 2. THE ZOMBIE KILLER FIX ---
     try:
-        # Note: If your array of URLs is very large (e.g., 10+), you might need to increase this 90-second timeout
-        result = await asyncio.wait_for(run_scraper(), timeout=90) 
+        # Wrap asyncio.wait_for inside asyncio.run() to ensure garbage collection
+        result = asyncio.run(asyncio.wait_for(run_scraper(), timeout=90))
         return jsonify(result) 
     except asyncio.TimeoutError:
         return jsonify({"error": "Overall scraping process timed out"}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-#if __name__ == '__main__':
-    #app.run(host='0.0.0.0', port=5000, threaded=True)
 
 if __name__ == '__main__':
-    # REMOVE the Flask dev server:
-    # app.run(host='0.0.0.0', port=5000, threaded=True)
-    
-    # ADD the Waitress production server:
     from waitress import serve
-    print("🚀 Starting production server with Waitress (Max 4 threads)...")
-    
-    # This strictly limits the server to 4 concurrent threads. 
-    # If n8n sends a 5th request, it simply waits in a queue safely instead of crashing the server.
+    print("🚀 Starting Noon production server with Waitress (Max 4 threads)...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
