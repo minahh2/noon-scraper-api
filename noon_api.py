@@ -47,24 +47,25 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-const elements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
-for (let el of elements) {
-    let hasClass = Array.from(el.classList).some(className => className.endsWith('_slidingOptionsTriggerContainer'));
-    let isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
+const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
+for (let element of triggerElements) {
+    // Changed to .includes() to bypass Noon's new React hashes at the end of the class name
+    let hasTargetClass = Array.from(element.classList).some(c => c.includes('_slidingOptionsTriggerContainer'));
+    let isElementVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
 
-    if (hasClass && isVisible) {
-        const rect = el.getBoundingClientRect();
-        const x = rect.left + (rect.width / 2);
-        const y = rect.top + (rect.height / 2);
+    if (hasTargetClass && isElementVisible) {
+        const boundingBox = element.getBoundingClientRect();
+        const coordX = boundingBox.left + (boundingBox.width / 2);
+        const coordY = boundingBox.top + (boundingBox.height / 2);
 
-        const eventTypes = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
-        eventTypes.forEach(eventType => {
-            const event = new MouseEvent(eventType, {
+        const mouseEvents = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
+        mouseEvents.forEach(evtType => {
+            const simulatedEvent = new MouseEvent(evtType, {
                 view: window, bubbles: true, cancelable: true, buttons: 1,
-                clientX: x, clientY: y, screenX: x, screenY: y
+                clientX: coordX, clientY: coordY, screenX: coordX, screenY: coordY
             });
-            let target = el.firstElementChild ? el.firstElementChild : el;
-            target.dispatchEvent(event);
+            let dispatchTarget = element.firstElementChild ? element.firstElementChild : element;
+            dispatchTarget.dispatchEvent(simulatedEvent);
         });
         break; 
     }
