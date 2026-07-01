@@ -48,36 +48,25 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 async function openOffersAndDynamicWait() {
-    const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"], [class*="slidingOptionsTrigger"]');
+    const triggerElements = document.querySelectorAll('[class*="slidingOptionsTrigger"]');
     let clicked = false;
 
     for (let element of triggerElements) {
-        let isElementVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
+        let isVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
 
-        if (isElementVisible) {
-            const boundingBox = element.getBoundingClientRect();
-            const coordX = boundingBox.left + (boundingBox.width / 2);
-            const coordY = boundingBox.top + (boundingBox.height / 2);
-
-            const mouseEvents = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
-            mouseEvents.forEach(evtType => {
-                const simulatedEvent = new MouseEvent(evtType, {
-                    view: window, bubbles: true, cancelable: true, buttons: 1,
-                    clientX: coordX, clientY: coordY, screenX: coordX, screenY: coordY
-                });
-                let dispatchTarget = element.firstElementChild ? element.firstElementChild : element;
-                dispatchTarget.dispatchEvent(simulatedEvent);
-            });
+        if (isVisible) {
+            // Scroll to the button and execute a native HTML click
+            element.scrollIntoView({behavior: "smooth", block: "center"});
+            element.click(); 
             clicked = true;
             break; 
         }
     }
 
-    // Dynamic Wait: Poll specifically for the inner seller cards, not the parent container!
+    // Dynamic Wait for the seller rows
     if (clicked) {
         let attempts = 0;
         while (attempts < 20) { // Max 2 seconds
-            // Check if the actual data rows have populated
             let offerCards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
             
             if (offerCards.length > 0) {
@@ -85,7 +74,7 @@ async function openOffersAndDynamicWait() {
                 await new Promise(r => setTimeout(r, 150));
                 break; 
             }
-            await new Promise(r => setTimeout(r, 100)); // Poll every 100ms
+            await new Promise(r => setTimeout(r, 100));
             attempts++;
         }
     }
