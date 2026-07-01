@@ -48,14 +48,13 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 async function openOffersAndDynamicWait() {
-    const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
+    const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"], [class*="slidingOptionsTrigger"]');
     let clicked = false;
 
     for (let element of triggerElements) {
-        let hasTargetClass = Array.from(element.classList).some(c => c.includes('_slidingOptionsTriggerContainer'));
         let isElementVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
 
-        if (hasTargetClass && isElementVisible) {
+        if (isElementVisible) {
             const boundingBox = element.getBoundingClientRect();
             const coordX = boundingBox.left + (boundingBox.width / 2);
             const coordY = boundingBox.top + (boundingBox.height / 2);
@@ -74,27 +73,25 @@ async function openOffersAndDynamicWait() {
         }
     }
 
-    // --- YOUR LOGIC: DYNAMICALLY WAIT FOR THE SECOND BUTTON ---
-    // Zero hard delays. It checks every 100ms and exits instantly when found.
+    // Dynamic Wait: Poll specifically for the inner seller cards, not the parent container!
     if (clicked) {
         let attempts = 0;
-        while (attempts < 20) { // Maximum wait of 2 seconds to prevent crashes
-            let allCartButtons = document.querySelectorAll('[data-qa="pdp-add-to-cart-revamp"]');
-            let offersList = document.querySelector('[class*="_offersListCtr_"], [class*="_offersList_"]');
+        while (attempts < 20) { // Max 2 seconds
+            // Check if the actual data rows have populated
+            let offerCards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
             
-            // If the second cart button OR the sidebar list loads, exit instantly!
-            if (allCartButtons.length > 1 || offersList) {
+            if (offerCards.length > 0) {
+                // Cards found! Give React 150ms to hydrate the text inside them
+                await new Promise(r => setTimeout(r, 150));
                 break; 
             }
-            await new Promise(r => setTimeout(r, 100)); // 100ms micro-pause
+            await new Promise(r => setTimeout(r, 100)); // Poll every 100ms
             attempts++;
         }
     }
 }
-// Execute and await the function so Crawl4AI knows to wait for the DOM to update
 await openOffersAndDynamicWait();
 """
-
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
