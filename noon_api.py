@@ -48,7 +48,7 @@ browser_config = BrowserConfig(
 
 # --- THE TROJAN HORSE WAIT CONDITION ---
     # This script runs inside Playwright's evaluator. It forces Python to wait until the JS says it's done.
-    JS_WAIT_CONDITION = """js:() => {
+JS_WAIT_CONDITION = """js:() => {
         // 1. Check if the main page is loaded by looking for the price
         const priceLoaded = document.querySelector('[data-qa="div-price-now"], [class*="priceNowText"]');
         if (!priceLoaded) return false; // Keep waiting for the main page to load
@@ -119,8 +119,7 @@ browser_config = BrowserConfig(
         
         // Return false initially to force Playwright to keep polling this function
         return false;
-    }"""
-
+}"""
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
