@@ -47,29 +47,52 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
-for (let element of triggerElements) {
-    // Changed to .includes() to bypass Noon's new React hashes at the end of the class name
-    let hasTargetClass = Array.from(element.classList).some(c => c.includes('_slidingOptionsTriggerContainer'));
-    let isElementVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
+async function openOffersAndDynamicWait() {
+    const triggerElements = document.querySelectorAll('[class*="_slidingOptionsTriggerContainer"]');
+    let clicked = false;
 
-    if (hasTargetClass && isElementVisible) {
-        const boundingBox = element.getBoundingClientRect();
-        const coordX = boundingBox.left + (boundingBox.width / 2);
-        const coordY = boundingBox.top + (boundingBox.height / 2);
+    for (let element of triggerElements) {
+        let hasTargetClass = Array.from(element.classList).some(c => c.includes('_slidingOptionsTriggerContainer'));
+        let isElementVisible = element.offsetWidth > 0 && element.offsetHeight > 0;
 
-        const mouseEvents = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
-        mouseEvents.forEach(evtType => {
-            const simulatedEvent = new MouseEvent(evtType, {
-                view: window, bubbles: true, cancelable: true, buttons: 1,
-                clientX: coordX, clientY: coordY, screenX: coordX, screenY: coordY
+        if (hasTargetClass && isElementVisible) {
+            const boundingBox = element.getBoundingClientRect();
+            const coordX = boundingBox.left + (boundingBox.width / 2);
+            const coordY = boundingBox.top + (boundingBox.height / 2);
+
+            const mouseEvents = ['mouseenter', 'mouseover', 'pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'];
+            mouseEvents.forEach(evtType => {
+                const simulatedEvent = new MouseEvent(evtType, {
+                    view: window, bubbles: true, cancelable: true, buttons: 1,
+                    clientX: coordX, clientY: coordY, screenX: coordX, screenY: coordY
+                });
+                let dispatchTarget = element.firstElementChild ? element.firstElementChild : element;
+                dispatchTarget.dispatchEvent(simulatedEvent);
             });
-            let dispatchTarget = element.firstElementChild ? element.firstElementChild : element;
-            dispatchTarget.dispatchEvent(simulatedEvent);
-        });
-        break; 
+            clicked = true;
+            break; 
+        }
+    }
+
+    // --- YOUR LOGIC: DYNAMICALLY WAIT FOR THE SECOND BUTTON ---
+    // Zero hard delays. It checks every 100ms and exits instantly when found.
+    if (clicked) {
+        let attempts = 0;
+        while (attempts < 20) { // Maximum wait of 2 seconds to prevent crashes
+            let allCartButtons = document.querySelectorAll('[data-qa="pdp-add-to-cart-revamp"]');
+            let offersList = document.querySelector('[class*="_offersListCtr_"], [class*="_offersList_"]');
+            
+            // If the second cart button OR the sidebar list loads, exit instantly!
+            if (allCartButtons.length > 1 || offersList) {
+                break; 
+            }
+            await new Promise(r => setTimeout(r, 100)); // 100ms micro-pause
+            attempts++;
+        }
     }
 }
+// Execute and await the function so Crawl4AI knows to wait for the DOM to update
+await openOffersAndDynamicWait();
 """
 
 @app.route('/scrape', methods=['POST'])
