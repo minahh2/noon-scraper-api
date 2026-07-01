@@ -85,7 +85,10 @@ def scrape():
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
+    #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
+    # --- NEW, BULLETPROOF CSS SELECTORS ---
+    # We now target data-qa attributes because they don't change when Noon updates their CSS
+    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
