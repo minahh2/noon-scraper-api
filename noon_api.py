@@ -46,80 +46,49 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE TROJAN HORSE WAIT CONDITION ---
-    # This script runs inside Playwright's evaluator. It forces Python to wait until the JS says it's done.
-JS_WAIT_CONDITION = """js:() => {
-        // 1. Check if the main page is loaded by looking for the price
-        const priceLoaded = document.querySelector('[data-qa="div-price-now"], [class*="priceNowText"]');
-        if (!priceLoaded) return false; // Keep waiting for the main page to load
+# --- STEALTH CLICK & DYNAMIC WAIT ---
+JS_CLICK_SCRIPT = """
+    (async () => {
+        const delay = ms => new Promise(res => setTimeout(res, ms));
+        const triggerElements = document.querySelectorAll('[class*="slidingOptionsTrigger"]');
+        let clicked = false;
 
-        // 2. If we already started the click process, wait until it finishes
-        if (window._noonScrapingOffers) {
-            return window._noonOffersDone === true;
+        for (let element of triggerElements) {
+            if (element.offsetWidth > 0 && element.offsetHeight > 0) {
+                element.scrollIntoView({behavior: "smooth", block: "center"});
+                await delay(300); // Brief pause for smooth scroll to finish
+                
+                // Stealth synthetic click to bypass Datadome
+                const rect = element.getBoundingClientRect();
+                const x = rect.left + (rect.width / 2);
+                const y = rect.top + (rect.height / 2);
+                const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
+                
+                events.forEach(evt => {
+                    const e = new MouseEvent(evt, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+                    (element.firstElementChild || element).dispatchEvent(e);
+                });
+                
+                clicked = true;
+                break;
+            }
         }
-        window._noonScrapingOffers = true;
-        window._noonOffersDone = false;
 
-        // 3. Background process to click and wait for sidebar
-        (async () => {
-            const delay = ms => new Promise(res => setTimeout(res, ms));
-            let triggerBtn = null;
-            
-            // Try to find the trigger button by its class
-            const elements = document.querySelectorAll('[class*="slidingOptionsTrigger"]');
-            for (let el of elements) {
-                if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-                    triggerBtn = el;
+        // Dynamic Wait: Poll for the offer cards without hard delays
+        if (clicked) {
+            let attempts = 0;
+            while(attempts < 20) { // 2 seconds max
+                let cards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
+                if (cards.length > 0) {
+                    await delay(150); // Let React hydrate the text
                     break;
                 }
+                await delay(100);
+                attempts++;
             }
-            
-            // Fallback: Find the button aggressively by its text content
-            if (!triggerBtn) {
-                const allEl = Array.from(document.querySelectorAll('*'));
-                for (let i = allEl.length - 1; i >= 0; i--) {
-                    const txt = (allEl[i].textContent || "").toLowerCase();
-                    if (txt.includes("offers from") || txt.includes("offers available") || txt.includes("other sellers")) {
-                        if (allEl[i].children.length === 0) {
-                            let p = allEl[i].parentElement;
-                            while (p && p !== document.body) {
-                                if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button' || p.className.includes('Trigger')) {
-                                    triggerBtn = p; 
-                                    break;
-                                }
-                                p = p.parentElement;
-                            }
-                            if (triggerBtn) break;
-                        }
-                    }
-                }
-            }
-
-            if (triggerBtn) {
-                triggerBtn.scrollIntoView({behavior: "smooth", block: "center"});
-                await delay(300);
-                triggerBtn.click();
-                
-                // Poll for the actual offer cards to load inside the sidebar
-                let attempts = 0;
-                while(attempts < 30) { // Max 3 seconds
-                    let cards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
-                    if (cards.length > 0) {
-                        await delay(200); // Give React 200ms to populate the text
-                        break;
-                    }
-                    await delay(100);
-                    attempts++;
-                }
-            }
-            
-            // Signal Playwright that we are 100% done and it can extract the HTML
-            window._noonOffersDone = true;
-        })();
-        
-        // Return false initially to force Playwright to keep polling this function
-        return false;
-}"""
+        }
+    })();
+"""
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
@@ -137,13 +106,14 @@ def scrape():
     #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
     # --- NEW, BULLETPROOF CSS SELECTORS ---
     # We now target data-qa attributes because they don't change when Noon updates their CSS
-    #buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
+    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        #js_code=[JS_CLICK_SCRIPT],
-        wait_for=JS_WAIT_CONDITION, 
+        wait_for='[data-qa="div-price-now"], [class*="priceNowText"]',
+        js_code=[JS_CLICK_SCRIPT],
+        
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
