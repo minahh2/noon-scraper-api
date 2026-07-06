@@ -46,53 +46,49 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- TOP-LEVEL AWAIT SCRIPT ---
 JS_CLICK_SCRIPT = """
-    await (async () => {
-        const delay = ms => new Promise(res => setTimeout(res, ms));
-        const triggerElements = document.querySelectorAll('[class*="slidingOptionsTrigger"], [class*="_slidingOptionsTriggerContainer"]');
-        let clicked = false;
+    (async () => {
+        const flag = document.createElement('div');
+        flag.id = 'noon-scraper-done';
+        
+        try {
+            const delay = ms => new Promise(res => setTimeout(res, ms));
+            
+            // 1. STRICT TARGETING: Only look for actual <button> elements to avoid clicking links
+            let btn = Array.from(document.querySelectorAll('button')).find(el => 
+                (el.textContent || "").toLowerCase().includes("offers from") || 
+                (el.textContent || "").toLowerCase().includes("other sellers")
+            );
 
-        for (let el of triggerElements) {
-            if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-                el.scrollIntoView({behavior: "smooth", block: "center"});
-                await delay(500);
-                
-                // Native Click
-                el.click();
-                
-                // React inner span click
-                let innerText = el.querySelector('span');
-                if (innerText) innerText.click();
-
-                // Synthetic Mouse Events (Datadome Safe)
-                const rect = el.getBoundingClientRect();
-                const x = rect.left + (rect.width / 2);
-                const y = rect.top + (rect.height / 2);
-                const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
-                events.forEach(evt => {
-                    const e = new MouseEvent(evt, { bubbles: true, cancelable: true, clientX: x, clientY: y });
-                    el.dispatchEvent(e);
-                    if(innerText) innerText.dispatchEvent(e);
-                });
-
-                clicked = true;
-                break;
+            // Fallback: search by class, but strictly avoid <a> tags
+            if (!btn) {
+                btn = document.querySelector('button[class*="slidingOptionsTrigger"], div[class*="slidingOptionsTrigger"]');
             }
-        }
 
-        // Wait for the sidebar and the offers to actually load
-        if (clicked) {
-            let attempts = 0;
-            while(attempts < 30) { 
-                let cards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
-                if (cards.length > 0) {
-                    await delay(300); // 300ms buffer for React to hydrate prices
-                    break;
+            if (btn) {
+                btn.scrollIntoView({behavior: "smooth", block: "center"});
+                await delay(500); 
+                
+                // 2. ONE CLEAN CLICK: No event flooding, no double-clicking spans.
+                btn.click();
+                
+                // 3. WAIT FOR SELLER CARDS
+                let attempts = 0;
+                while (attempts < 40) { // Max 4 seconds
+                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
+                    if (cards.length > 0) {
+                        await delay(800); // 800ms buffer for React to inject the prices
+                        break;
+                    }
+                    await delay(100);
+                    attempts++;
                 }
-                await delay(100);
-                attempts++;
             }
+        } catch (error) {
+            console.error("Click script error:", error);
+        } finally {
+            // 4. THE FLAG IS SECURE
+            document.body.appendChild(flag);
         }
     })();
 """
@@ -118,8 +114,9 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        wait_for='[data-qa="div-price-now"], [class*="priceNowText"]',
-        js_code=[JS_CLICK_SCRIPT],
+        js_code_before_wait=[JS_CLICK_SCRIPT],
+        wait_for='#noon-scraper-done',
+        #js_code=[JS_CLICK_SCRIPT],
         
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
