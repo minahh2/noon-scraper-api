@@ -46,49 +46,63 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- STEALTH CLICK & DYNAMIC WAIT ---
+# --- SYNCHRONIZED JS CLICK SCRIPT ---
 JS_CLICK_SCRIPT = """
     (async () => {
         const delay = ms => new Promise(res => setTimeout(res, ms));
-        const triggerElements = document.querySelectorAll('[class*="slidingOptionsTrigger"]');
+        const triggerElements = document.querySelectorAll('[class*="slidingOptionsTrigger"], [class*="_slidingOptionsTriggerContainer"]');
         let clicked = false;
 
-        for (let element of triggerElements) {
-            if (element.offsetWidth > 0 && element.offsetHeight > 0) {
-                element.scrollIntoView({behavior: "smooth", block: "center"});
-                await delay(300); // Brief pause for smooth scroll to finish
+        for (let el of triggerElements) {
+            if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+                el.scrollIntoView({behavior: "smooth", block: "center"});
+                await delay(500);
                 
-                // Stealth synthetic click to bypass Datadome
-                const rect = element.getBoundingClientRect();
+                // 1. Native Click
+                el.click();
+                
+                // 2. React inner span click
+                let innerText = el.querySelector('span');
+                if (innerText) innerText.click();
+
+                // 3. Synthetic Mouse Events (Datadome Safe)
+                const rect = el.getBoundingClientRect();
                 const x = rect.left + (rect.width / 2);
                 const y = rect.top + (rect.height / 2);
                 const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
-                
                 events.forEach(evt => {
                     const e = new MouseEvent(evt, { bubbles: true, cancelable: true, clientX: x, clientY: y });
-                    (element.firstElementChild || element).dispatchEvent(e);
+                    el.dispatchEvent(e);
+                    if(innerText) innerText.dispatchEvent(e);
                 });
-                
+
                 clicked = true;
                 break;
             }
         }
 
-        // Dynamic Wait: Poll for the offer cards without hard delays
+        // Wait for the sidebar and the 7 offers to actually load
         if (clicked) {
             let attempts = 0;
-            while(attempts < 20) { // 2 seconds max
+            while(attempts < 30) { 
                 let cards = document.querySelectorAll('a[class*="_card_"], [class*="OtherOfferListItem"]');
                 if (cards.length > 0) {
-                    await delay(150); // Let React hydrate the text
+                    await delay(300); // 300ms buffer for React to hydrate prices
                     break;
                 }
                 await delay(100);
                 attempts++;
             }
         }
+
+        // --- THE CRITICAL SYNC FLAG ---
+        // We append a hidden div. Python will wait for this specific ID to exist.
+        const flag = document.createElement('div');
+        flag.id = 'noon-scraper-done';
+        document.body.appendChild(flag);
     })();
 """
+
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
@@ -111,7 +125,7 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        wait_for='[data-qa="div-price-now"], [class*="priceNowText"]',
+        wait_for='#noon-scraper-done',
         js_code=[JS_CLICK_SCRIPT],
         
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
