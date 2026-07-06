@@ -2,3 +2,4 @@ Flask[async]
 crawl4ai
 playwright
 waitress
+playwright-stealth
