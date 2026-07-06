@@ -1,16 +1,13 @@
 import json
 import asyncio
 from flask import Flask, request, jsonify
-from crawl4ai import (
-    AsyncWebCrawler,
-    CrawlerRunConfig,
-    JsonCssExtractionStrategy,
-    BrowserConfig,
-    CacheMode
-)
+from crawl4ai import JsonCssExtractionStrategy
+from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async # <--- THE DATADOME SHIELD
 
 app = Flask(__name__)
 
+# YOUR EXACT TRACKER BLACKHOLE
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
     "MAP *.googletagmanager.com 127.0.0.1, "
@@ -25,97 +22,6 @@ tracker_blackhole = (
     "MAP *.clarity.ms 127.0.0.1"
 )
 
-browser_config = BrowserConfig(
-    viewport_width=1920,
-    viewport_height=1080,
-    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    user_agent_mode="random",
-    text_mode=True, 
-    light_mode=True,
-    user_data_dir="/app/chrome_cache",
-    use_persistent_context=False,
-    extra_args=[
-        "--no-sandbox", 
-        "--disable-gpu", 
-        "--disable-extensions",
-        "--disable-dev-shm-usage", 
-        "--js-flags=--max-old-space-size=512",
-        "--blink-settings=imagesEnabled=false", 
-        "--disable-features=IsolateOrigins,site-per-process",
-        f"--host-rules={tracker_blackhole}"
-    ]
-)
-
-JS_CLICK_SCRIPT = """
-    new Promise(async (resolve) => {
-        try {
-            const delay = ms => new Promise(res => setTimeout(res, ms));
-
-            // Python has already waited for the Add to Cart button, so we can search immediately
-            let btn = Array.from(document.querySelectorAll('button')).find(el => 
-                (el.textContent || "").toLowerCase().includes("offers from") || 
-                (el.textContent || "").toLowerCase().includes("other sellers")
-            );
-
-            if (!btn) {
-                btn = document.querySelector('button[class*="slidingOptionsTrigger"], div[class*="slidingOptionsTrigger"]');
-            }
-
-            if (btn) {
-                btn.scrollIntoView({behavior: "smooth", block: "center"});
-                await delay(800); 
-                
-                // 1. The React Fiber Hack
-                const reactKey = Object.keys(btn).find(k => k.startsWith('__reactFiber$'));
-                let reactInjected = false;
-
-                if (reactKey) {
-                    let currentFiber = btn[reactKey];
-                    while (currentFiber) {
-                        let props = currentFiber.memoizedProps;
-                        if (props && (props.onClick || props.onPointerDown)) {
-                            let fakeEvent = {
-                                preventDefault: () => {}, stopPropagation: () => {},
-                                nativeEvent: { isTrusted: true }, isTrusted: true,
-                                target: btn, currentTarget: btn
-                            };
-                            if (props.onPointerDown) props.onPointerDown(fakeEvent);
-                            if (props.onClick) props.onClick(fakeEvent);
-                            reactInjected = true;
-                            break;
-                        }
-                        currentFiber = currentFiber.return;
-                    }
-                }
-
-                if (!reactInjected) {
-                    btn.click();
-                }
-                
-                // 2. WAIT FOR CARDS TO LOAD (Max 7.5 seconds)
-                let attempts = 0;
-                while (attempts < 15) { 
-                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
-                    let realCardsLoaded = Array.from(cards).filter(card => card.innerText.trim().length > 5);
-                    
-                    if (realCardsLoaded.length > 0) {
-                        await delay(800); // Give React 800ms to paint prices
-                        break;
-                    }
-                    await delay(500);
-                    attempts++;
-                }
-            } else {
-                console.log("No Other Offers button found. Product has a single seller.");
-            }
-        } catch (error) {
-            console.error("Click script error:", error);
-        }
-        
-        // 3. THIS INSTANTLY RELEASES PYTHON - NO HTML FLAGS NEEDED
-        resolve(true); 
-    });
-"""
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
@@ -129,51 +35,98 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
+    # Retain your exact extraction schema
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
-
-    config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        extraction_strategy=extraction_strategy,
-        wait_for=buy_box_wait_selector,
-        js_code_before_wait=[JS_CLICK_SCRIPT],
-       
-        
-        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
-        exclude_external_links=True,
-        exclude_social_media_links=True,
-        exclude_external_images=True,
-        screenshot=False, 
-        scan_full_page=False,
-        magic=True,
-        simulate_user=True,
-        page_timeout=180000 
-    )
 
     async def run_scraper():
-        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
-            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
+        output = []
+        
+        async with async_playwright() as p:
+            # YOUR EXACT BROWSER ARGS + Automation flags disabled
+            browser = await p.chromium.launch(
+                headless=True,
+                ignore_default_args=["--enable-automation"], # Hides the "Chrome is being controlled" banner natively
+                args=[
+                    "--no-sandbox", 
+                    "--disable-gpu", 
+                    "--disable-extensions",
+                    "--disable-dev-shm-usage", 
+                    "--js-flags=--max-old-space-size=512",
+                    "--blink-settings=imagesEnabled=false", 
+                    "--disable-features=IsolateOrigins,site-per-process",
+                    f"--host-rules={tracker_blackhole}"
+                ]
+            )
             
-            output = []
-            for result in results:
-                if result.success:
-                    try:
-                        extracted = json.loads(result.extracted_content)
-                    except Exception:
-                        extracted = {"error": "Failed to parse extracted content"}
+            # YOUR EXACT VIEWPORT AND USER AGENT
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+
+            for url in urls:
+                page = await context.new_page()
+                
+                # APPLY STEALTH: This prevents the ERR_HTTP2_PROTOCOL_ERROR
+                await stealth_async(page) 
+                
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     
+                    # Wait for your exact requested element
+                    await page.wait_for_selector('[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]', timeout=20000)
+
+                    # --- THE NATIVE CDP CLICK ---
+                    btn_selector = 'button:has-text("offers from"), button:has-text("other sellers"), button[class*="slidingOptionsTrigger"]'
+                    
+                    try:
+                        btn = await page.wait_for_selector(btn_selector, timeout=4000)
+                        if btn:
+                            await btn.scroll_into_view_if_needed()
+                            await page.wait_for_timeout(800)
+                            
+                            # This fires an OS-level isTrusted=true click
+                            await btn.click()
+                            
+                            # Wait for real text to replace skeletons
+                            attempts = 0
+                            while attempts < 15:
+                                has_real_cards = await page.evaluate('''() => {
+                                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
+                                    let realCards = Array.from(cards).filter(c => c.innerText.trim().length > 5);
+                                    return realCards.length > 0;
+                                }''')
+                                if has_real_cards:
+                                    await page.wait_for_timeout(800) 
+                                    break
+                                await page.wait_for_timeout(500)
+                                attempts += 1
+                                
+                    except Exception as e:
+                        print(f"No secondary offers button found or click failed: {e}")
+                    
+                    # Extract HTML and pass to Crawl4AI mapping
+                    html = await page.content()
+                    extracted = extraction_strategy.extract(url, html)
+                    
+                    try:
+                        parsed_data = json.loads(extracted) if isinstance(extracted, str) else extracted
+                    except Exception:
+                        parsed_data = extracted
+                        
                     output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "data": extracted
+                        "url": url, 
+                        "status": 200, 
+                        "data": parsed_data
                     })
-                else:
-                    output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "error": result.error_message
-                    })
-            return output
+                    
+                except Exception as e:
+                    output.append({"url": url, "status": 500, "error": str(e)})
+                finally:
+                    await page.close()
+            
+            await browser.close()
+        return output
 
     try:
         result = asyncio.run(run_scraper())
@@ -183,5 +136,5 @@ def scrape():
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Noon production server with Waitress (Max 4 threads)...")
+    print("🚀 Starting Stealth Scraper with Waitress...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
