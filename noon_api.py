@@ -6,6 +6,7 @@ from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 
+# YOUR EXACT TRACKER BLACKHOLE
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
     "MAP *.googletagmanager.com 127.0.0.1, "
@@ -33,14 +34,14 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
-    # Keep Crawl4AI's brilliant JSON extractor
+    # Retain your exact extraction schema
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
-    async def run_python_scraper():
+    async def run_scraper():
         output = []
         
-        # 1. Boot raw Playwright instead of AsyncWebCrawler
         async with async_playwright() as p:
+            # YOUR EXACT BROWSER CONFIG ARGS
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -49,15 +50,16 @@ def scrape():
                     "--disable-extensions",
                     "--disable-dev-shm-usage", 
                     "--js-flags=--max-old-space-size=512",
+                    "--blink-settings=imagesEnabled=false", 
                     "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-blink-features=AutomationControlled", 
                     f"--host-rules={tracker_blackhole}"
                 ]
             )
             
+            # YOUR EXACT VIEWPORT AND USER AGENT
             context = await browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             )
 
             for url in urls:
@@ -65,10 +67,10 @@ def scrape():
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     
-                    # 2. Wait for your exact requested element
+                    # YOUR EXACT WAIT_FOR SELECTOR
                     await page.wait_for_selector('[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]', timeout=20000)
 
-                    # 3. Target the button
+                    # NATIVE PYTHON CLICK (Bypasses the console's isTrusted block)
                     btn_selector = 'button:has-text("offers from"), button:has-text("other sellers"), button[class*="slidingOptionsTrigger"]'
                     
                     try:
@@ -77,22 +79,27 @@ def scrape():
                             await btn.scroll_into_view_if_needed()
                             await page.wait_for_timeout(500)
                             
-                            # 4. PYTHON HARDWARE CLICK (The Datadome Killer)
-                            # This simulates a physical mouse click via the Chrome DevTools Protocol
+                            # The true hardware click Datadome requires
                             await btn.click()
                             
-                            # 5. Wait for the real text to replace the skeletons
-                            await page.wait_for_function('''() => {
-                                let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
-                                let realCards = Array.from(cards).filter(c => c.innerText.trim().length > 5);
-                                return realCards.length > 0;
-                            }''', timeout=10000)
-                            
-                            await page.wait_for_timeout(500) 
-                    except Exception:
-                        pass # Single-seller product, just move on
+                            # Max 5 seconds fail-fast loop to wait for real text to replace skeletons
+                            attempts = 0
+                            while attempts < 10:
+                                has_real_cards = await page.evaluate('''() => {
+                                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
+                                    let realCards = Array.from(cards).filter(c => c.innerText.trim().length > 5);
+                                    return realCards.length > 0;
+                                }''')
+                                if has_real_cards:
+                                    await page.wait_for_timeout(800) # Give React time to paint
+                                    break
+                                await page.wait_for_timeout(500)
+                                attempts += 1
+                                
+                    except Exception as e:
+                        print(f"No secondary offers button found or click failed: {e}")
                     
-                    # 6. Grab the HTML and feed it to Crawl4AI
+                    # Extract final HTML and pass to Crawl4AI mapping
                     html = await page.content()
                     extracted = extraction_strategy.extract(url, html)
                     
@@ -116,12 +123,12 @@ def scrape():
         return output
 
     try:
-        result = asyncio.run(run_python_scraper())
+        result = asyncio.run(run_scraper())
         return jsonify(result) 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Python-Native Noon Scraper with Waitress...")
+    print("🚀 Starting Noon production server with Waitress (Max 4 threads)...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
