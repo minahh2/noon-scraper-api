@@ -1,12 +1,16 @@
 import json
 import asyncio
 from flask import Flask, request, jsonify
-from crawl4ai import JsonCssExtractionStrategy
-from playwright.async_api import async_playwright
+from crawl4ai import (
+    AsyncWebCrawler,
+    CrawlerRunConfig,
+    JsonCssExtractionStrategy,
+    BrowserConfig,
+    CacheMode
+)
 
 app = Flask(__name__)
 
-# YOUR EXACT TRACKER BLACKHOLE
 tracker_blackhole = (
     "MAP *.google-analytics.com 127.0.0.1, "
     "MAP *.googletagmanager.com 127.0.0.1, "
@@ -21,6 +25,118 @@ tracker_blackhole = (
     "MAP *.clarity.ms 127.0.0.1"
 )
 
+browser_config = BrowserConfig(
+    viewport_width=1920,
+    viewport_height=1080,
+    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    user_agent_mode="random",
+    text_mode=True, 
+    light_mode=True,
+    user_data_dir="/app/chrome_cache",
+    use_persistent_context=False,
+    extra_args=[
+        "--no-sandbox", 
+        "--disable-gpu", 
+        "--disable-extensions",
+        "--disable-dev-shm-usage", 
+        "--js-flags=--max-old-space-size=512",
+        "--blink-settings=imagesEnabled=false", 
+        "--disable-features=IsolateOrigins,site-per-process",
+        f"--host-rules={tracker_blackhole}"
+    ]
+)
+
+# --- THE DATADOME BEHAVIORAL BYPASS ---
+JS_CLICK_SCRIPT = """
+    (async () => {
+        const flag = document.createElement('div');
+        flag.id = 'noon-scraper-done';
+        
+        try {
+            const delay = ms => new Promise(res => setTimeout(res, ms));
+            
+            let btn = Array.from(document.querySelectorAll('button')).find(el => 
+                (el.textContent || "").toLowerCase().includes("offers from") || 
+                (el.textContent || "").toLowerCase().includes("other sellers")
+            );
+
+            if (!btn) {
+                btn = document.querySelector('button[class*="slidingOptionsTrigger"], div[class*="slidingOptionsTrigger"]');
+            }
+
+            if (btn) {
+                btn.scrollIntoView({behavior: "smooth", block: "center"});
+                await delay(800); 
+                
+                const rect = btn.getBoundingClientRect();
+                const targetX = rect.left + (rect.width / 2);
+                const targetY = rect.top + (rect.height / 2);
+                
+                // 1. BEHAVIORAL SPOOFING: Feed Datadome a human mouse trail
+                for(let i = 1; i <= 5; i++) {
+                    let moveX = targetX - (20 / i);
+                    let moveY = targetY - (20 / i);
+                    document.dispatchEvent(new MouseEvent('mousemove', { 
+                        bubbles: true, clientX: moveX, clientY: moveY, screenX: moveX, screenY: moveY 
+                    }));
+                    await delay(40);
+                }
+                
+                // 2. THE REACT FIBER HACK (Combined with the trusted coordinates)
+                const reactKey = Object.keys(btn).find(k => k.startsWith('__reactFiber$'));
+                let reactInjected = false;
+
+                if (reactKey) {
+                    let currentFiber = btn[reactKey];
+                    while (currentFiber) {
+                        let props = currentFiber.memoizedProps;
+                        if (props && (props.onClick || props.onPointerDown)) {
+                            let fakeEvent = {
+                                preventDefault: () => {},
+                                stopPropagation: () => {},
+                                nativeEvent: { isTrusted: true }, 
+                                isTrusted: true,
+                                target: btn,
+                                currentTarget: btn,
+                                clientX: targetX,
+                                clientY: targetY
+                            };
+                            if (props.onPointerDown) props.onPointerDown(fakeEvent);
+                            if (props.onClick) props.onClick(fakeEvent);
+                            reactInjected = true;
+                            break;
+                        }
+                        currentFiber = currentFiber.return;
+                    }
+                }
+
+                if (!reactInjected) {
+                    btn.click(); // Fallback
+                }
+                
+                // 3. FAIL-FAST ANTI-SKELETON LOOP (Max 7.5 seconds)
+                let attempts = 0;
+                while (attempts < 15) { 
+                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
+                    let realCardsLoaded = Array.from(cards).filter(card => card.innerText.trim().length > 5);
+                    
+                    if (realCardsLoaded.length > 0) {
+                        await delay(800); // 800ms buffer for React to inject the prices
+                        break;
+                    }
+                    await delay(500);
+                    attempts++;
+                }
+            }
+        } catch (error) {
+            console.error("Click script error:", error);
+        } finally {
+            // 4. GUARANTEED RELEASE: Python will never deadlock again
+            document.body.appendChild(flag);
+        }
+    })();
+"""
+
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
@@ -34,93 +150,50 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
-    # Retain your exact extraction schema
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
+    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
+
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        extraction_strategy=extraction_strategy,
+        js_code_before_wait=[JS_CLICK_SCRIPT],
+        wait_for='#noon-scraper-done',
+        
+        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
+        exclude_external_links=True,
+        exclude_social_media_links=True,
+        exclude_external_images=True,
+        screenshot=False, 
+        scan_full_page=False,
+        magic=True,
+        simulate_user=True,
+        page_timeout=180000 
+    )
 
     async def run_scraper():
-        output = []
-        
-        async with async_playwright() as p:
-            # YOUR EXACT BROWSER CONFIG ARGS
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox", 
-                    "--disable-gpu", 
-                    "--disable-extensions",
-                    "--disable-dev-shm-usage", 
-                    "--js-flags=--max-old-space-size=512",
-                    "--blink-settings=imagesEnabled=false", 
-                    "--disable-features=IsolateOrigins,site-per-process",
-                    f"--host-rules={tracker_blackhole}"
-                ]
-            )
+        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
+            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
             
-            # YOUR EXACT VIEWPORT AND USER AGENT
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-
-            for url in urls:
-                page = await context.new_page()
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                    
-                    # YOUR EXACT WAIT_FOR SELECTOR
-                    await page.wait_for_selector('[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]', timeout=20000)
-
-                    # NATIVE PYTHON CLICK (Bypasses the console's isTrusted block)
-                    btn_selector = 'button:has-text("offers from"), button:has-text("other sellers"), button[class*="slidingOptionsTrigger"]'
-                    
+            output = []
+            for result in results:
+                if result.success:
                     try:
-                        btn = await page.wait_for_selector(btn_selector, timeout=4000)
-                        if btn:
-                            await btn.scroll_into_view_if_needed()
-                            await page.wait_for_timeout(500)
-                            
-                            # The true hardware click Datadome requires
-                            await btn.click()
-                            
-                            # Max 5 seconds fail-fast loop to wait for real text to replace skeletons
-                            attempts = 0
-                            while attempts < 10:
-                                has_real_cards = await page.evaluate('''() => {
-                                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
-                                    let realCards = Array.from(cards).filter(c => c.innerText.trim().length > 5);
-                                    return realCards.length > 0;
-                                }''')
-                                if has_real_cards:
-                                    await page.wait_for_timeout(800) # Give React time to paint
-                                    break
-                                await page.wait_for_timeout(500)
-                                attempts += 1
-                                
-                    except Exception as e:
-                        print(f"No secondary offers button found or click failed: {e}")
-                    
-                    # Extract final HTML and pass to Crawl4AI mapping
-                    html = await page.content()
-                    extracted = extraction_strategy.extract(url, html)
-                    
-                    try:
-                        parsed_data = json.loads(extracted) if isinstance(extracted, str) else extracted
+                        extracted = json.loads(result.extracted_content)
                     except Exception:
-                        parsed_data = extracted
-                        
-                    output.append({
-                        "url": url, 
-                        "status": 200, 
-                        "data": parsed_data
-                    })
+                        extracted = {"error": "Failed to parse extracted content"}
                     
-                except Exception as e:
-                    output.append({"url": url, "status": 500, "error": str(e)})
-                finally:
-                    await page.close()
-            
-            await browser.close()
-        return output
+                    output.append({
+                        "url": result.url, 
+                        "status": result.status_code, 
+                        "data": extracted
+                    })
+                else:
+                    output.append({
+                        "url": result.url, 
+                        "status": result.status_code, 
+                        "error": result.error_message
+                    })
+            return output
 
     try:
         result = asyncio.run(run_scraper())
