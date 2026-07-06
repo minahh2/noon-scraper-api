@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Added dumb-init
+# Added dumb-init and required system dependencies for Playwright/Chromium
 RUN apt-get update && apt-get install -y \
     wget curl gnupg libglib2.0-0 libnss3 libfontconfig1 \
     libxss1 libasound2 libxtst6 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 \
@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Pre-create cache directory to ensure permissions
+RUN mkdir -p /app/chrome_cache
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install --with-deps chromium
@@ -18,5 +21,6 @@ RUN python -m playwright install --with-deps chromium
 COPY noon_api.py .
 
 EXPOSE 5000
+
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["python", "noon_api.py"]
