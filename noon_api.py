@@ -46,15 +46,24 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE DATADOME BEHAVIORAL BYPASS ---
 JS_CLICK_SCRIPT = """
     (async () => {
-        const flag = document.createElement('div');
-        flag.id = 'noon-scraper-done';
-        
         try {
             const delay = ms => new Promise(res => setTimeout(res, ms));
-            
+
+            // 1. WAIT FOR YOUR PREFERRED SELECTOR FIRST
+            // This guarantees React has fully loaded the page before we do anything
+            let pageLoaded = false;
+            for (let i = 0; i < 40; i++) { // Max 20 seconds wait for page load
+                if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]')) {
+                    pageLoaded = true;
+                    await delay(500); // Give the DOM a half-second to settle
+                    break;
+                }
+                await delay(500);
+            }
+
+            // 2. CHECK FOR THE OFFERS BUTTON
             let btn = Array.from(document.querySelectorAll('button')).find(el => 
                 (el.textContent || "").toLowerCase().includes("offers from") || 
                 (el.textContent || "").toLowerCase().includes("other sellers")
@@ -68,21 +77,7 @@ JS_CLICK_SCRIPT = """
                 btn.scrollIntoView({behavior: "smooth", block: "center"});
                 await delay(800); 
                 
-                const rect = btn.getBoundingClientRect();
-                const targetX = rect.left + (rect.width / 2);
-                const targetY = rect.top + (rect.height / 2);
-                
-                // 1. BEHAVIORAL SPOOFING: Feed Datadome a human mouse trail
-                for(let i = 1; i <= 5; i++) {
-                    let moveX = targetX - (20 / i);
-                    let moveY = targetY - (20 / i);
-                    document.dispatchEvent(new MouseEvent('mousemove', { 
-                        bubbles: true, clientX: moveX, clientY: moveY, screenX: moveX, screenY: moveY 
-                    }));
-                    await delay(40);
-                }
-                
-                // 2. THE REACT FIBER HACK (Combined with the trusted coordinates)
+                // The React Fiber Hack (Spoofing human interaction)
                 const reactKey = Object.keys(btn).find(k => k.startsWith('__reactFiber$'));
                 let reactInjected = false;
 
@@ -92,14 +87,9 @@ JS_CLICK_SCRIPT = """
                         let props = currentFiber.memoizedProps;
                         if (props && (props.onClick || props.onPointerDown)) {
                             let fakeEvent = {
-                                preventDefault: () => {},
-                                stopPropagation: () => {},
-                                nativeEvent: { isTrusted: true }, 
-                                isTrusted: true,
-                                target: btn,
-                                currentTarget: btn,
-                                clientX: targetX,
-                                clientY: targetY
+                                preventDefault: () => {}, stopPropagation: () => {},
+                                nativeEvent: { isTrusted: true }, isTrusted: true,
+                                target: btn, currentTarget: btn
                             };
                             if (props.onPointerDown) props.onPointerDown(fakeEvent);
                             if (props.onClick) props.onClick(fakeEvent);
@@ -111,32 +101,37 @@ JS_CLICK_SCRIPT = """
                 }
 
                 if (!reactInjected) {
-                    btn.click(); // Fallback
+                    btn.click();
                 }
                 
-                // 3. FAIL-FAST ANTI-SKELETON LOOP (Max 7.5 seconds)
+                // 3. WAIT FOR CARDS TO LOAD
                 let attempts = 0;
-                while (attempts < 15) { 
+                while (attempts < 15) { // Max 7.5 seconds
                     let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
                     let realCardsLoaded = Array.from(cards).filter(card => card.innerText.trim().length > 5);
                     
                     if (realCardsLoaded.length > 0) {
-                        await delay(800); // 800ms buffer for React to inject the prices
+                        await delay(800); 
                         break;
                     }
                     await delay(500);
                     attempts++;
                 }
+            } else {
+                // YOUR LOGIC: If no button appears after Add to Cart loads, there are no offers!
+                console.log("No Other Offers button found. Moving on immediately.");
             }
         } catch (error) {
             console.error("Click script error:", error);
         } finally {
-            // 4. GUARANTEED RELEASE: Python will never deadlock again
+            // 4. DROP THE FLAG SAFELY AT THE VERY END
+            // Python is waiting for this exact element to extract the HTML
+            const flag = document.createElement('div');
+            flag.id = 'noon-scraper-done';
             document.body.appendChild(flag);
         }
     })();
 """
-
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
