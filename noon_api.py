@@ -47,23 +47,11 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-    (async () => {
+    new Promise(async (resolve) => {
         try {
             const delay = ms => new Promise(res => setTimeout(res, ms));
 
-            // 1. WAIT FOR YOUR PREFERRED SELECTOR FIRST
-            // This guarantees React has fully loaded the page before we do anything
-            let pageLoaded = false;
-            for (let i = 0; i < 40; i++) { // Max 20 seconds wait for page load
-                if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]')) {
-                    pageLoaded = true;
-                    await delay(500); // Give the DOM a half-second to settle
-                    break;
-                }
-                await delay(500);
-            }
-
-            // 2. CHECK FOR THE OFFERS BUTTON
+            // Python has already waited for the Add to Cart button, so we can search immediately
             let btn = Array.from(document.querySelectorAll('button')).find(el => 
                 (el.textContent || "").toLowerCase().includes("offers from") || 
                 (el.textContent || "").toLowerCase().includes("other sellers")
@@ -77,7 +65,7 @@ JS_CLICK_SCRIPT = """
                 btn.scrollIntoView({behavior: "smooth", block: "center"});
                 await delay(800); 
                 
-                // The React Fiber Hack (Spoofing human interaction)
+                // 1. The React Fiber Hack
                 const reactKey = Object.keys(btn).find(k => k.startsWith('__reactFiber$'));
                 let reactInjected = false;
 
@@ -104,33 +92,29 @@ JS_CLICK_SCRIPT = """
                     btn.click();
                 }
                 
-                // 3. WAIT FOR CARDS TO LOAD
+                // 2. WAIT FOR CARDS TO LOAD (Max 7.5 seconds)
                 let attempts = 0;
-                while (attempts < 15) { // Max 7.5 seconds
+                while (attempts < 15) { 
                     let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
                     let realCardsLoaded = Array.from(cards).filter(card => card.innerText.trim().length > 5);
                     
                     if (realCardsLoaded.length > 0) {
-                        await delay(800); 
+                        await delay(800); // Give React 800ms to paint prices
                         break;
                     }
                     await delay(500);
                     attempts++;
                 }
             } else {
-                // YOUR LOGIC: If no button appears after Add to Cart loads, there are no offers!
-                console.log("No Other Offers button found. Moving on immediately.");
+                console.log("No Other Offers button found. Product has a single seller.");
             }
         } catch (error) {
             console.error("Click script error:", error);
-        } finally {
-            // 4. DROP THE FLAG SAFELY AT THE VERY END
-            // Python is waiting for this exact element to extract the HTML
-            const flag = document.createElement('div');
-            flag.id = 'noon-scraper-done';
-            document.body.appendChild(flag);
         }
-    })();
+        
+        // 3. THIS INSTANTLY RELEASES PYTHON - NO HTML FLAGS NEEDED
+        resolve(true); 
+    });
 """
 @app.route('/scrape', methods=['POST'])
 def scrape():
@@ -151,8 +135,9 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
+        wait_for=buy_box_wait_selector,
         js_code_before_wait=[JS_CLICK_SCRIPT],
-        wait_for='#noon-scraper-done',
+       
         
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
