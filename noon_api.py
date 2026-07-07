@@ -50,15 +50,20 @@ JS_CLICK_SCRIPT = """
 (async () => {
     const MARKER_ID = 'noon-other-offers-loaded';
     
-    // Helper to safely drop the flag so Python never hangs
-    const addMarker = () => {
-        if (!document.getElementById(MARKER_ID)) {
-            const div = document.createElement('div');
-            div.id = MARKER_ID;
-            div.style.display = 'none';
-            document.body.appendChild(div);
-            console.log(`✅ Marker #${MARKER_ID} added.`);
-        }
+    // THE FIX: An indestructible marker that survives React DOM wipes
+    const lockMarker = () => {
+        setInterval(() => {
+            if (!document.getElementById(MARKER_ID)) {
+                const div = document.createElement('div');
+                div.id = MARKER_ID;
+                div.style.display = 'none';
+                div.innerText = 'done';
+                
+                // Append to documentElement (HTML tag) to avoid React body overwrites
+                (document.body || document.documentElement).appendChild(div);
+                console.log(`✅ Marker #${MARKER_ID} locked into DOM.`);
+            }
+        }, 200);
     };
 
     try {
@@ -109,7 +114,7 @@ JS_CLICK_SCRIPT = """
         console.log("🎯 Targeting parent element:", parent);
         parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
         
-        // YOUR EXACT FIX: Non-blocking setTimeout to prevent UI crashing
+        // Non-blocking setTimeout to prevent UI crashing
         setTimeout(() => {
             try {
                 parent.click();
@@ -121,7 +126,7 @@ JS_CLICK_SCRIPT = """
             }
         }, 300);
 
-        // Wait for Content (Wait up to 7.5 seconds to account for the setTimeout delay)
+        // Wait for Content 
         console.log("⏳ Checking for loaded offers...");
         let offersCount = 0;
         for (let i = 0; i < 15; i++) {
@@ -148,9 +153,8 @@ JS_CLICK_SCRIPT = """
     } catch (error) {
         console.error("❌ Exception caught within execution flow: ", error);
     } finally {
-        // GUARANTEE: Python gets unblocked immediately, no 180s timeout
-        addMarker();
-        console.log("🏁 Process complete.");
+        // GUARANTEE: Lock the marker into the DOM so Python finds it instantly and the 180s timeout is eliminated
+        lockMarker();
     }
 })();
 """
