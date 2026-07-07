@@ -47,55 +47,53 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE HYBRID CLICKER HOOK ---
-# JS finds the button. Playwright forces the hardware click.
+# --- THE NATIVE POINTER HOOK ---
 async def native_click_hook(page, *args, **kwargs):
-    print("⏳ [HOOK] Initializing hybrid click strategy...")
+    print("⏳ [HOOK] Initializing native memory pointer strategy...")
     try:
-        # 1. Give the page a moment to fully render the React DOM
+        # Let React fully hydrate the initial page view
         await page.wait_for_timeout(2000)
 
-        # 2. JS traverses the DOM to find the exact button and tags it with an ID
-        tag_script = """() => {
-            const keywords = ["offers from", "other sellers", "عروض أكثر من بائعين آخرين", "عروض أخرى"];
+        # JS finds the button and returns the raw DOM object natively to Python
+        pointer_script = """() => {
+            const keywords = ["offers from", "other sellers", "عروض أكثر", "عروض أخرى"];
             const elements = document.querySelectorAll('button, div, span, p');
             
             for (let el of elements) {
                 let text = (el.innerText || el.textContent || "").trim().toLowerCase();
-                if (text.length > 5 && text.length < 60 && keywords.some(kw => text.includes(kw))) {
-                    let btn = el.closest('button') || el.closest('[class*="Trigger"]') || el;
-                    btn.setAttribute('id', 'NOON_TARGET_BUTTON');
-                    return true;
+                if (text.length >= 5 && text.length < 60 && keywords.some(kw => text.includes(kw))) {
+                    // Returns the button element itself!
+                    return el.closest('button') || el.closest('[class*="Trigger"]') || el;
                 }
             }
-            
-            let fallback = document.querySelector('[class*="slidingOptionsTrigger"]');
-            if (fallback) {
-                fallback.setAttribute('id', 'NOON_TARGET_BUTTON');
-                return true;
-            }
-            return false;
+            return document.querySelector('[class*="slidingOptionsTrigger"]');
         }"""
         
-        found = await page.evaluate(tag_script)
+        # Capture the DOM element directly into a Python variable
+        element_handle = await page.evaluate_handle(pointer_script)
         
-        if not found:
-            print("⚠️ [HOOK] Button not found by Javascript. Skipping click.")
+        # Check if the JS function returned null
+        is_null = await element_handle.evaluate("node => node === null")
+        if is_null:
+            print("⚠️ [HOOK] Button not found on page. Skipping click.")
             return
 
-        print("🎯 [HOOK] Button targeted. Executing forced hardware click...")
-        target = page.locator('#NOON_TARGET_BUTTON').first
+        print("🎯 [HOOK] Button captured in memory. Forcing hardware click...")
+        element = element_handle.as_element()
         
-        # force=True BYPASSES all invisible cookie banners and location popups!
-        await target.click(force=True)
+        # Bring it into view and crush it with a forced Playwright click
+        await element.scroll_into_view_if_needed()
+        await page.wait_for_timeout(500)
         
-        print("⏳ [HOOK] Waiting for offer cards to hydrate...")
-        # Wait for the exact cards your schema is looking for to appear
+        await element.click(force=True)
+        
+        print("⏳ [HOOK] Canvas opening. Waiting for offers to load...")
+        # Wait for the exact cards your n8n schema uses
         await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="attached", timeout=15000)
         
-        # Give React 2 full seconds to paint the EGP prices inside the cards
+        # Give React 2 seconds to paint the Arabic/English prices inside the cards
         await page.wait_for_timeout(2000)
-        print("🎉 [HOOK] Cards successfully loaded and hydrated!")
+        print("🎉 [HOOK] Cards successfully loaded and populated!")
         
     except Exception as e:
         print(f"❌ [HOOK] Exception encountered: {e}")
@@ -132,7 +130,7 @@ def scrape():
         async def run_scraper():
             async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
                 
-                # Attach our Hybrid Hook
+                # Attach the hook
                 crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
                 
                 results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
@@ -166,5 +164,5 @@ def scrape():
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Noon production server with Waitress (Hybrid Click Bridge)...")
+    print("🚀 Starting Noon production server with Waitress (Native Pointer Bridge)...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
