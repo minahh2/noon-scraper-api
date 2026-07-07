@@ -170,7 +170,7 @@ def scrape():
         js_code_before_wait=[JS_CLICK_SCRIPT],
         wait_for='#noon-other-offers-loaded',
         #js_code=[JS_CLICK_SCRIPT],
-        
+        wait_after_js_code=10.0,
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
