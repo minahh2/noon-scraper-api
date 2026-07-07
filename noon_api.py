@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-# Browser config (same as before)
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
@@ -14,40 +13,35 @@ browser_config = BrowserConfig(
     extra_args=["--no-sandbox", "--disable-gpu"]
 )
 
-# The Native Clicker (Updated to be Universal)
 async def native_click_hook(page, *args, **kwargs):
-    print("⏳ [HOOK] Attempting to click 'Other Offers'...")
+    print("⏳ [HOOK] Attempting to find and click 'Other Offers' trigger...")
+    
+    # These are the 3 most common triggers for the "Other Offers" panel on Noon
+    selectors = [
+        '[class*="slidingOptionsTrigger"]',
+        '[data-qa="other-sellers-trigger"]',
+        'button:has-text("offers")', 
+        'div:has-text("عروض")'
+    ]
+    
     try:
-        # This will find ANY element (button, div, span) containing the text
-        # It covers both Arabic and English scenarios
-        target_text = "عروض" 
+        clicked = False
+        for selector in selectors:
+            btn = page.locator(selector).first
+            if await btn.count() > 0:
+                print(f"🎯 [HOOK] Found button with selector: {selector}")
+                await btn.scroll_into_view_if_needed()
+                await btn.click(force=True)
+                clicked = True
+                await page.wait_for_timeout(3000) # Wait for panel to open
+                break
         
-        # We use a JavaScript expression to find the element that contains the text
-        # and click it directly. This bypasses selector type issues.
-        script = f"""
-        () => {{
-            const elements = Array.from(document.querySelectorAll('*'));
-            const btn = elements.find(el => 
-                el.innerText && 
-                el.innerText.includes('{target_text}') && 
-                el.innerText.length < 50 &&
-                el.children.length === 0
-            );
-            if (btn) {{
-                btn.click();
-                return true;
-            }}
-            return false;
-        }}
-        """
-        
-        clicked = await page.evaluate(script)
-        if clicked:
-            print("✅ [HOOK] Click successful!")
-            await page.wait_for_timeout(3000) # Give React 3 seconds to render the list
-        else:
-            print("⚠️ [HOOK] Could not find the button with text 'عروض'.")
-            
+        if not clicked:
+            print("⚠️ [HOOK] Could NOT find the trigger button. Listing all buttons found:")
+            # Diagnostic: Print all buttons found on the page to help us debug
+            buttons = await page.eval_on_selector_all("button, div[role='button']", "elements => elements.map(el => el.innerText)")
+            print(f"Buttons found: {buttons}")
+
     except Exception as e:
         print(f"❌ [HOOK] Click failed: {e}")
 
@@ -60,7 +54,6 @@ def scrape():
         async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
             crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
             
-            # Using BYPASS cache to force fresh page
             config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
             results = await crawler.arun_many(urls=urls, config=config, semaphore_count=1)
             
@@ -72,14 +65,12 @@ def scrape():
                 name = soup.select_one("h1")
                 price = soup.select_one("[data-qa='div-price-now']")
                 
-                # Extract offers using your verified CSS
+                # Extract offers
                 cards = soup.select("a[class*='_card_'][href*='?o=']")
                 offers = []
                 for card in cards:
-                    # Robust parsing
                     seller = card.select_one("[class*='_sellerName_']")
                     price_el = card.select_one("[class*='_sellingPrice_'] strong")
-                    
                     offers.append({
                         "seller": seller.text.strip() if seller else "Unknown",
                         "price": price_el.text.strip() if price_el else "0"
@@ -90,7 +81,7 @@ def scrape():
                     "product": name.text.strip() if name else "N/A",
                     "price": price.text.strip() if price else "N/A",
                     "other_offers": offers,
-                    "debug_cards_found": len(cards) # We add this to help you debug
+                    "debug_cards_found": len(cards)
                 })
             return output
 
