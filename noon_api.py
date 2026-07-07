@@ -47,50 +47,64 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-    (async () => {
-        const flag = document.createElement('div');
-        flag.id = 'noon-scraper-done';
-        
-        try {
-            const delay = ms => new Promise(res => setTimeout(res, ms));
-            
-            // 1. STRICT TARGETING: Only look for actual <button> elements to avoid clicking links
-            let btn = Array.from(document.querySelectorAll('button')).find(el => 
-                (el.textContent || "").toLowerCase().includes("offers from") || 
-                (el.textContent || "").toLowerCase().includes("other sellers")
-            );
+    (function aggressiveClick() {
+    console.log("🔍 Looking for 'More offers from other sellers'...");
 
-            // Fallback: search by class, but strictly avoid <a> tags
-            if (!btn) {
-                btn = document.querySelector('button[class*="slidingOptionsTrigger"], div[class*="slidingOptionsTrigger"]');
+    // 1. Find the element containing the text
+    const allElements = document.querySelectorAll('*');
+    let target = null;
+    for (let el of allElements) {
+        if (el.innerText && el.innerText.trim().toLowerCase() === "more offers from other sellers") {
+            // Ensure it's not a deep container, but a leaf node or close to it
+            if (el.children.length === 0) {
+                target = el;
+                break;
             }
-
-            if (btn) {
-                btn.scrollIntoView({behavior: "smooth", block: "center"});
-                await delay(500); 
-                
-                // 2. ONE CLEAN CLICK: No event flooding, no double-clicking spans.
-                btn.click();
-                
-                // 3. WAIT FOR SELLER CARDS
-                let attempts = 0;
-                while (attempts < 40) { // Max 4 seconds
-                    let cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], [class*="OtherOfferListItem"]');
-                    if (cards.length > 0) {
-                        await delay(800); // 800ms buffer for React to inject the prices
-                        break;
-                    }
-                    await delay(100);
-                    attempts++;
-                }
-            }
-        } catch (error) {
-            console.error("Click script error:", error);
-        } finally {
-            // 4. THE FLAG IS SECURE
-            document.body.appendChild(flag);
         }
-    })();
+    }
+
+    if (!target) {
+        console.error("❌ Still can't find the exact text node. Are you sure you are on the product page?");
+        return;
+    }
+
+    // 2. Grab the immediate parent (where the event listener is)
+    const parent = target.parentElement;
+    console.log("🎯 Targeting parent element:", parent);
+
+    // 3. Setup Network Monitor
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        if (args[0].toString().includes("offers")) {
+            console.log(`📡 API Status: ${response.status}`);
+        }
+        return response;
+    };
+
+    // 4. Fire events on the parent
+    console.log("⚡ Forcing click on parent...");
+    
+    // We try multiple ways to trigger the JS
+    parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    
+    setTimeout(() => {
+        // Method A: Standard Click
+        parent.click();
+        
+        // Method B: Dispatch MouseEvent
+        const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+        const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
+        parent.dispatchEvent(mousedown);
+        parent.dispatchEvent(mouseup);
+        
+        // Method C: If the parent has an 'onclick' property, call it directly
+        if (typeof parent.onclick === 'function') {
+            parent.onclick();
+            console.log("✅ Executed internal 'onclick' function.");
+        }
+    }, 500);
+})();
 """
 @app.route('/scrape', methods=['POST'])
 def scrape():
@@ -114,9 +128,9 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        js_code_before_wait=[JS_CLICK_SCRIPT],
-        wait_for='#noon-scraper-done',
-        #js_code=[JS_CLICK_SCRIPT],
+        #js_code_before_wait=[JS_CLICK_SCRIPT],
+        wait_for=buy_box_wait_selector,
+        js_code=[JS_CLICK_SCRIPT],
         
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
