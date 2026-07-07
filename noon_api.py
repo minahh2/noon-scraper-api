@@ -47,63 +47,102 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-    (function aggressiveClick() {
-    console.log("🔍 Looking for 'More offers from other sellers'...");
-
-    // 1. Find the element containing the text
-    const allElements = document.querySelectorAll('*');
-    let target = null;
-    for (let el of allElements) {
-        if (el.innerText && el.innerText.trim().toLowerCase() === "more offers from other sellers") {
-            // Ensure it's not a deep container, but a leaf node or close to it
-            if (el.children.length === 0) {
-                target = el;
-                break;
-            }
+    (async () => {
+    const MARKER_ID = 'noon-other-offers-loaded';
+    
+    // Helper to add the marker div
+    const addMarker = () => {
+        if (!document.getElementById(MARKER_ID)) {
+            const div = document.createElement('div');
+            div.id = MARKER_ID;
+            div.style.display = 'none';
+            document.body.appendChild(div);
+            console.log(`✅ Marker #${MARKER_ID} added.`);
         }
+    };
+
+    // 1. Wait for specific elements to load first
+    console.log("⏳ Waiting for page elements to load...");
+    const waitForElements = (selectors, timeout = 5000) => {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const interval = setInterval(() => {
+                const found = selectors.every(s => document.querySelector(s));
+                if (found) {
+                    clearInterval(interval);
+                    resolve(true);
+                } else if (Date.now() - start > timeout) {
+                    clearInterval(interval);
+                    resolve(false);
+                }
+            }, 500);
+        });
+    };
+
+    const isReady = await waitForElements(['[data-qa="pdp-add-to-cart-revamp"]', '[data-qa="div-price-now"]']);
+    
+    if (!isReady) {
+        console.warn("⚠️ Timeout: Critical elements did not load. Skipping.");
+        addMarker();
+        return;
+    }
+    console.log("✅ Page elements detected. Proceeding...");
+
+    // 2. Scan for 'Other Offers' button (2s timeout)
+    let btn = null;
+    for (let i = 0; i < 20; i++) {
+        btn = Array.from(document.querySelectorAll('*')).find(el => 
+            el.innerText && 
+            el.innerText.trim().toLowerCase().includes("more offers from other sellers") &&
+            el.children.length === 0
+        );
+        if (btn) break;
+        await new Promise(r => setTimeout(r, 100));
     }
 
-    if (!target) {
-        console.error("❌ Still can't find the exact text node. Are you sure you are on the product page?");
+    if (!btn) {
+        console.warn("⚠️ Button not detected. Skipping.");
+        addMarker();
         return;
     }
 
-    // 2. Grab the immediate parent (where the event listener is)
-    const parent = target.parentElement;
+    // 3. Target parent and Execute Click
+    const parent = btn.parentElement;
     console.log("🎯 Targeting parent element:", parent);
-
-    // 3. Setup Network Monitor
-    const originalFetch = window.fetch;
-    window.fetch = async function(...args) {
-        const response = await originalFetch.apply(this, args);
-        if (args[0].toString().includes("offers")) {
-            console.log(`📡 API Status: ${response.status}`);
-        }
-        return response;
-    };
-
-    // 4. Fire events on the parent
-    console.log("⚡ Forcing click on parent...");
-    
-    // We try multiple ways to trigger the JS
     parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
     
     setTimeout(() => {
-        // Method A: Standard Click
         parent.click();
+        parent.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        parent.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        if (typeof parent.onclick === 'function') parent.onclick();
+    }, 300);
+
+    // 4. Wait for Content (Wait up to 6 seconds)
+    console.log("⏳ Checking for loaded offers...");
+    let offersCount = 0;
+    for (let i = 0; i < 12; i++) {
+        // Looking for offer rows: containing price (EGP) and action buttons
+        const items = Array.from(document.querySelectorAll('*')).filter(el => 
+            el.innerText && 
+            el.innerText.includes("EGP") && 
+            (el.innerText.includes("Sold by") || el.innerText.includes("Add To Cart"))
+        );
         
-        // Method B: Dispatch MouseEvent
-        const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-        const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
-        parent.dispatchEvent(mousedown);
-        parent.dispatchEvent(mouseup);
-        
-        // Method C: If the parent has an 'onclick' property, call it directly
-        if (typeof parent.onclick === 'function') {
-            parent.onclick();
-            console.log("✅ Executed internal 'onclick' function.");
+        if (items.length > offersCount) {
+            offersCount = items.length;
+            console.log(`📡 Detected ${offersCount} offers so far...`);
         }
-    }, 500);
+        
+        if (offersCount > 2) {
+            console.log(`🎉 SUCCESS: ${offersCount} offers loaded.`);
+            break;
+        }
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    addMarker();
+    console.log("🏁 Process complete.");
 })();
 """
 @app.route('/scrape', methods=['POST'])
@@ -128,9 +167,9 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        #js_code_before_wait=[JS_CLICK_SCRIPT],
-        wait_for=buy_box_wait_selector,
-        js_code=[JS_CLICK_SCRIPT],
+        js_code_before_wait=[JS_CLICK_SCRIPT],
+        wait_for='#noon-other-offers-loaded',
+        #js_code=[JS_CLICK_SCRIPT],
         
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
