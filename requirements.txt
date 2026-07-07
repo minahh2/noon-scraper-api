@@ -3,3 +3,4 @@ crawl4ai
 playwright
 waitress
 playwright-stealth
+beautifulsoup4
