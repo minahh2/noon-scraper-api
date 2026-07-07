@@ -1,29 +1,62 @@
-# --- Update ONLY this block in your noon_api.py ---
-async def native_click_hook(page, *args, **kwargs):
-    print("⏳ [HOOK] Attempting to find trigger...")
-    
-    # Aggressive selector: Looking for buttons, divs, and Links (<a>)
-    selectors = [
-        '[class*="slidingOptionsTrigger"]',
-        'button:has-text("offers")', 
-        'div:has-text("عروض")',
-        'a:has-text("عروض")',
-        'a:has-text("offers")'
-    ]
-    
+import json
+import asyncio
+from flask import Flask, request, jsonify
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, BrowserConfig, CacheMode
+from bs4 import BeautifulSoup
+from waitress import serve
+
+app = Flask(__name__)
+
+# Minimal config
+browser_config = BrowserConfig(
+    headless=True,
+    extra_args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+)
+
+@app.route('/scrape', methods=['POST'])
+def scrape():
+    data = request.get_json()
+    urls = data.get("urls", [])
+
+    async def run_scraper():
+        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
+            # We will use a very simple click logic that doesn't overwhelm the browser
+            async def simple_click(page, *args, **kwargs):
+                try:
+                    # Look for the specific "Other Sellers" text
+                    btn = page.locator('text=Other offers').or_(page.locator('text=عروض أخرى')).first
+                    if await btn.count() > 0:
+                        await btn.click(force=True)
+                        await page.wait_for_timeout(2000)
+                except: pass
+
+            crawler.crawler_strategy.set_hook("after_goto", simple_click)
+            config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+            
+            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=1)
+            
+            output = []
+            for result in results:
+                soup = BeautifulSoup(result.html, 'html.parser')
+                cards = soup.select("a[class*='_card_'][href*='?o=']")
+                offers = []
+                for card in cards:
+                    seller = card.select_one("[class*='_sellerName_']")
+                    price_el = card.select_one("[class*='_sellingPrice_'] strong")
+                    offers.append({"seller": seller.text.strip() if seller else "Unknown", "price": price_el.text.strip() if price_el else "0"})
+                
+                output.append({
+                    "url": result.url,
+                    "other_offers": offers,
+                    "count": len(cards)
+                })
+            return output
+
     try:
-        for selector in selectors:
-            btn = page.locator(selector).first
-            if await btn.count() > 0:
-                print(f"🎯 [HOOK] Found element with selector: {selector}")
-                await btn.scroll_into_view_if_needed()
-                await btn.click(force=True)
-                await page.wait_for_timeout(3000)
-                return # Stop after first successful click
-
-        # If we reach here, we failed. Print EVERYTHING to logs for debugging.
-        elements = await page.eval_on_selector_all("button, div, a", "els => els.map(el => el.innerText.trim())")
-        print(f"⚠️ [HOOK] Could not find button. All actionable text found: {elements[:50]}") # First 50 items
-
+        return jsonify(asyncio.run(run_scraper()))
     except Exception as e:
-        print(f"❌ [HOOK] Click failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    # Use 1 thread to avoid memory spikes
+    serve(app, host='0.0.0.0', port=5000, threads=1)
