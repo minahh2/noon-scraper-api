@@ -6,62 +6,70 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-# Same config as before
+# Browser config (same as before)
 browser_config = BrowserConfig(
     viewport_width=1920,
     viewport_height=1080,
-    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     headless=True,
     extra_args=["--no-sandbox", "--disable-gpu"]
 )
 
-async def forensic_hook(page, *args, **kwargs):
-    print("📸 [FORENSIC] Taking a snapshot of the page...")
-    # This saves a file named 'debug_screenshot.png' in your container
-    await page.screenshot(path="debug_screenshot.png", full_page=True)
-    
-    # Check if there is a "Deliver to" or "Login" popup
-    content = await page.content()
-    if "Deliver to" in content or "login" in content.lower():
-        print("⚠️ [FORENSIC] Warning: Found popup in HTML.")
-    
-    # Try to click the button only if visible
+# The Native Clicker (Keeps the panel open)
+async def native_click_hook(page, *args, **kwargs):
+    print("⏳ [HOOK] Opening panel...")
     try:
-        btn = page.locator('button:has-text("عروض"), button:has-text("offers")').first
-        if await btn.is_visible():
+        # Wait for the button
+        btn_selector = 'button:has-text("عروض أكثر"), button:has-text("offers from"), [class*="slidingOptionsTrigger"]'
+        btn = page.locator(btn_selector).first
+        if await btn.count() > 0:
             await btn.click(force=True)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000) # Force wait for React to hydrate panel
+        else:
+            print("⚠️ [HOOK] No 'Other Offers' button found.")
     except Exception as e:
-        print(f"❌ [FORENSIC] Could not click: {e}")
+        print(f"❌ [HOOK] Click failed: {e}")
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
-    try:
-        data = request.get_json()
-        urls = data.get("urls")
+    data = request.get_json()
+    urls = data.get("urls")
 
-        async def run_scraper():
-            async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
-                crawler.crawler_strategy.set_hook("after_goto", forensic_hook)
-                config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
-                results = await crawler.arun_many(urls=urls, config=config, semaphore_count=1)
+    async def run_scraper():
+        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
+            crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
+            
+            # NO SCHEMA STRATEGY HERE. We want raw HTML.
+            config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=1)
+            
+            output = []
+            for result in results:
+                soup = BeautifulSoup(result.html, 'html.parser')
                 
-                output = []
-                for result in results:
-                    # Return title so we know if we are on the right page
-                    soup = BeautifulSoup(result.html, 'html.parser')
-                    title = soup.title.string if soup.title else "No Title Found"
-                    
-                    output.append({
-                        "url": result.url,
-                        "title_detected": title,
-                        "html_sample": result.html[:500] # Just the first 500 chars
+                # Extract main info
+                name = soup.select_one("h1")
+                price = soup.select_one("[data-qa='div-price-now']")
+                
+                # Extract offers using your verified CSS
+                cards = soup.select("a[class*='_card_'][href*='?o=']")
+                offers = []
+                for card in cards:
+                    seller = card.select_one("[class*='_sellerName_']")
+                    card_price = card.select_one("[class*='_sellingPrice_'] strong")
+                    offers.append({
+                        "seller": seller.text.strip() if seller else "Unknown",
+                        "price": card_price.text.strip() if card_price else "0"
                     })
-                return output
+                
+                output.append({
+                    "url": result.url,
+                    "product": name.text.strip() if name else "N/A",
+                    "price": price.text.strip() if price else "N/A",
+                    "other_offers": offers
+                })
+            return output
 
-        return jsonify(asyncio.run(run_scraper()))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(asyncio.run(run_scraper()))
 
 if __name__ == '__main__':
     from waitress import serve
