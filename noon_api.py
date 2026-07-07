@@ -47,116 +47,79 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-(async () => {
-    const MARKER_ID = 'noon-other-offers-loaded';
-    
-    // THE FIX: An indestructible marker that survives React DOM wipes
-    const lockMarker = () => {
-        setInterval(() => {
-            if (!document.getElementById(MARKER_ID)) {
-                const div = document.createElement('div');
-                div.id = MARKER_ID;
-                div.style.display = 'none';
-                div.innerText = 'done';
+new Promise((resolve) => {
+    (async () => {
+        try {
+            console.log("⏳ Starting execution...");
+            
+            // Scan for 'Other Offers' button
+            let btn = null;
+            for (let i = 0; i < 20; i++) {
+                btn = Array.from(document.querySelectorAll('*')).find(el => 
+                    el.innerText && 
+                    el.innerText.trim().toLowerCase().includes("more offers from other sellers") &&
+                    el.children.length === 0
+                );
+                if (btn) break;
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            if (!btn) {
+                console.warn("⚠️ Button not detected. Product might be single-seller.");
+                resolve(true); // Releases Python instantly
+                return;
+            }
+
+            // Target parent and Execute Click
+            const target = btn.parentElement || btn;
+            console.log("🎯 Targeting element:", target);
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // YOUR EXACT FIX: Non-blocking setTimeout to prevent UI crashing
+            setTimeout(() => {
+                try {
+                    target.click();
+                    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    if (typeof target.onclick === 'function') target.onclick();
+                } catch(e) {
+                    console.error("Click execution error:", e);
+                }
+            }, 300);
+
+            // Wait for Content
+            console.log("⏳ Checking for loaded offers...");
+            let offersCount = 0;
+            for (let i = 0; i < 15; i++) {
+                const items = Array.from(document.querySelectorAll('*')).filter(el => 
+                    el.innerText && 
+                    el.innerText.includes("EGP") && 
+                    (el.innerText.includes("Sold by") || el.innerText.includes("Add To Cart"))
+                );
                 
-                // Append to documentElement (HTML tag) to avoid React body overwrites
-                (document.body || document.documentElement).appendChild(div);
-                console.log(`✅ Marker #${MARKER_ID} locked into DOM.`);
+                if (items.length > offersCount) {
+                    offersCount = items.length;
+                    console.log(`📡 Detected ${offersCount} offers so far...`);
+                }
+                
+                if (offersCount > 2) {
+                    console.log(`🎉 SUCCESS: ${offersCount} offers loaded.`);
+                    // Buffer to let React paint, then instantly release Python
+                    setTimeout(() => resolve(true), 800); 
+                    return;
+                }
+                await new Promise(r => setTimeout(r, 500));
             }
-        }, 200);
-    };
 
-    try {
-        console.log("⏳ Waiting for page elements to load...");
-        const waitForElements = (selectors, timeout = 5000) => {
-            return new Promise((resolve) => {
-                const start = Date.now();
-                const interval = setInterval(() => {
-                    const found = selectors.every(s => document.querySelector(s));
-                    if (found) {
-                        clearInterval(interval);
-                        resolve(true);
-                    } else if (Date.now() - start > timeout) {
-                        clearInterval(interval);
-                        resolve(false);
-                    }
-                }, 500);
-            });
-        };
+            console.log("🏁 Loop finished without finding offers.");
+            resolve(true); // Failsafe release
 
-        const isReady = await waitForElements(['[data-qa="pdp-add-to-cart-revamp"]', '[data-qa="div-price-now"]']);
-        
-        if (!isReady) {
-            console.warn("⚠️ Timeout: Critical elements did not load. Skipping.");
-            return;
+        } catch (error) {
+            console.error("❌ Exception caught:", error);
+            resolve(true); // Failsafe release
         }
-        console.log("✅ Page elements detected. Proceeding...");
-
-        // Scan for 'Other Offers' button
-        let btn = null;
-        for (let i = 0; i < 20; i++) {
-            btn = Array.from(document.querySelectorAll('*')).find(el => 
-                el.innerText && 
-                el.innerText.trim().toLowerCase().includes("more offers from other sellers") &&
-                el.children.length === 0
-            );
-            if (btn) break;
-            await new Promise(r => setTimeout(r, 100));
-        }
-
-        if (!btn) {
-            console.warn("⚠️ Button not detected. Skipping.");
-            return;
-        }
-
-        // Target parent and Execute Click
-        const parent = btn.parentElement || btn;
-        console.log("🎯 Targeting parent element:", parent);
-        parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        
-        // Non-blocking setTimeout to prevent UI crashing
-        setTimeout(() => {
-            try {
-                parent.click();
-                parent.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                parent.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                if (typeof parent.onclick === 'function') parent.onclick();
-            } catch(e) {
-                console.error("Click execution error:", e);
-            }
-        }, 300);
-
-        // Wait for Content 
-        console.log("⏳ Checking for loaded offers...");
-        let offersCount = 0;
-        for (let i = 0; i < 15; i++) {
-            const items = Array.from(document.querySelectorAll('*')).filter(el => 
-                el.innerText && 
-                el.innerText.includes("EGP") && 
-                (el.innerText.includes("Sold by") || el.innerText.includes("Add To Cart"))
-            );
-            
-            if (items.length > offersCount) {
-                offersCount = items.length;
-                console.log(`📡 Detected ${offersCount} offers so far...`);
-            }
-            
-            if (offersCount > 2) {
-                console.log(`🎉 SUCCESS: ${offersCount} offers loaded.`);
-                // 800ms buffer after success so Python doesn't grab HTML while React is still painting
-                await new Promise(r => setTimeout(r, 800)); 
-                break;
-            }
-            await new Promise(r => setTimeout(r, 500));
-        }
-
-    } catch (error) {
-        console.error("❌ Exception caught within execution flow: ", error);
-    } finally {
-        // GUARANTEE: Lock the marker into the DOM so Python finds it instantly and the 180s timeout is eliminated
-        lockMarker();
-    }
-})();
+    })();
+});
 """
 @app.route('/scrape', methods=['POST'])
 def scrape():
@@ -180,9 +143,10 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        js_code_before_wait=[JS_CLICK_SCRIPT],
-        wait_for='#noon-other-offers-loaded',
-        #js_code=[JS_CLICK_SCRIPT],
+        #js_code_before_wait=[JS_CLICK_SCRIPT],
+        #wait_for='#noon-other-offers-loaded',
+        wait_for=buy_box_wait_selector,
+        js_code=[JS_CLICK_SCRIPT],
        
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
