@@ -50,6 +50,7 @@ JS_CLICK_SCRIPT = """
 (async () => {
     const MARKER_ID = 'noon-other-offers-loaded';
     
+    // Helper to safely drop the flag so Python never hangs
     const addMarker = () => {
         if (!document.getElementById(MARKER_ID)) {
             const div = document.createElement('div');
@@ -79,12 +80,14 @@ JS_CLICK_SCRIPT = """
         };
 
         const isReady = await waitForElements(['[data-qa="pdp-add-to-cart-revamp"]', '[data-qa="div-price-now"]']);
+        
         if (!isReady) {
             console.warn("⚠️ Timeout: Critical elements did not load. Skipping.");
             return;
         }
         console.log("✅ Page elements detected. Proceeding...");
 
+        // Scan for 'Other Offers' button
         let btn = null;
         for (let i = 0; i < 20; i++) {
             btn = Array.from(document.querySelectorAll('*')).find(el => 
@@ -101,22 +104,27 @@ JS_CLICK_SCRIPT = """
             return;
         }
 
-        // Safe extraction of actionable element
-        const target = btn.parentElement || btn;
-        console.log("🎯 Targeting click element:", target);
-        target.scrollIntoView({ behavior: 'instant', block: 'center' });
+        // Target parent and Execute Click
+        const parent = btn.parentElement || btn;
+        console.log("🎯 Targeting parent element:", parent);
+        parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
         
-        // Linearized wait instead of standard async setTimeout block
-        await new Promise(r => setTimeout(r, 300));
+        // YOUR EXACT FIX: Non-blocking setTimeout to prevent UI crashing
+        setTimeout(() => {
+            try {
+                parent.click();
+                parent.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                parent.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                if (typeof parent.onclick === 'function') parent.onclick();
+            } catch(e) {
+                console.error("Click execution error:", e);
+            }
+        }, 300);
 
-        target.click();
-        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-        if (typeof target.onclick === 'function') target.onclick();
-
+        // Wait for Content (Wait up to 7.5 seconds to account for the setTimeout delay)
         console.log("⏳ Checking for loaded offers...");
         let offersCount = 0;
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 15; i++) {
             const items = Array.from(document.querySelectorAll('*')).filter(el => 
                 el.innerText && 
                 el.innerText.includes("EGP") && 
@@ -130,6 +138,8 @@ JS_CLICK_SCRIPT = """
             
             if (offersCount > 2) {
                 console.log(`🎉 SUCCESS: ${offersCount} offers loaded.`);
+                // 800ms buffer after success so Python doesn't grab HTML while React is still painting
+                await new Promise(r => setTimeout(r, 800)); 
                 break;
             }
             await new Promise(r => setTimeout(r, 500));
@@ -138,7 +148,7 @@ JS_CLICK_SCRIPT = """
     } catch (error) {
         console.error("❌ Exception caught within execution flow: ", error);
     } finally {
-        // This block is guaranteed to execute, preventing the 180000ms crawl hang
+        // GUARANTEE: Python gets unblocked immediately, no 180s timeout
         addMarker();
         console.log("🏁 Process complete.");
     }
