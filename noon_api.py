@@ -46,107 +46,51 @@ browser_config = BrowserConfig(
     ]
 )
 
-JS_CLICK_SCRIPT = """
-new Promise((resolve) => {
-    (async () => {
-        try {
-            console.log("⏳ Starting execution...");
-            
-            // 1. Scan for button (Bilingual: English & Exact Arabic)
-            let btn = null;
-            for (let i = 0; i < 20; i++) {
-                btn = Array.from(document.querySelectorAll('*')).find(el => {
-                    if (!el.innerText || el.children.length > 0) return false;
-                    let text = el.innerText.trim().toLowerCase();
-                    return text.includes("offers from") || 
-                           text.includes("other sellers") || 
-                           text.includes("عروض أكثر من بائعين آخرين") || 
-                           text.includes("عروض أخرى");
-                });
-                
-                // Fallback to Noon's internal class name if text fails entirely
-                if (!btn) {
-                    btn = document.querySelector('[class*="slidingOptionsTrigger"]');
-                }
+# --- THE NATIVE PLAYWRIGHT CLICKER (Replaces the JS Script) ---
+async def native_click_hook(page, context, **kwargs):
+    print("⏳ [PYTHON HOOK] Searching for More Offers button...")
+    try:
+        # 1. Target the button (Supports English, Arabic, and fallbacks)
+        btn_selector = 'button:has-text("عروض أكثر من بائعين آخرين"), button:has-text("offers from"), button:has-text("other sellers"), [class*="slidingOptionsTrigger"]'
+        
+        # 2. Wait up to 5 seconds for the button to exist
+        btn = page.locator(btn_selector).first
+        await btn.wait_for(state="visible", timeout=5000)
+        
+        # 3. NATIVE HARDWARE CLICK (Bypasses Datadome!)
+        print("🎯 [PYTHON HOOK] Button found. Clicking natively...")
+        await btn.click()
+        
+        # 4. Wait for YOUR exact schema baseSelector to load in the side panel
+        print("⏳ [PYTHON HOOK] Waiting for cards to load data...")
+        await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="visible", timeout=15000)
+        
+        # Give React 1.5 seconds to paint the actual text inside the cards
+        await page.wait_for_timeout(1500)
+        print("🎉 [PYTHON HOOK] Cards loaded successfully!")
+        
+    except Exception as e:
+        print("⚠️ [PYTHON HOOK] Button not found or single seller product. Skipping click.")
 
-                if (btn) break;
-                await new Promise(r => setTimeout(r, 100));
-            }
 
-            if (!btn) {
-                console.warn("⚠️ Button not detected. Product might be single-seller.");
-                resolve(true); 
-                return;
-            }
-
-            // 2. Target parent and Execute Click
-            const target = btn.parentElement || btn;
-            console.log("🎯 Targeting element:", target);
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            setTimeout(() => {
-                try {
-                    target.click();
-                    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                    if (typeof target.onclick === 'function') target.onclick();
-                } catch(e) {
-                    console.error("Click execution error:", e);
-                }
-            }, 300);
-
-            // 3. Wait for Content (Using the exact CSS from our bulletproof schema)
-            console.log("⏳ Checking for loaded offers...");
-            for (let i = 0; i < 15; i++) {
-                // Looking for the physical offer cards instead of language-specific text
-                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
-                
-                if (cards.length > 0) {
-                    console.log(`🎉 SUCCESS: ${cards.length} offers loaded.`);
-                    // Buffer to let React paint the text inside the cards, then release Python
-                    setTimeout(() => resolve(true), 800); 
-                    return;
-                }
-                await new Promise(r => setTimeout(r, 500));
-            }
-
-            console.log("🏁 Loop finished without finding offers.");
-            resolve(true); 
-
-        } catch (error) {
-            console.error("❌ Exception caught:", error);
-            resolve(true); 
-        }
-    })();
-});
-"""
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
-    
-    if not data:
-         return jsonify({"error": "No JSON payload received"}), 400
+    if not data: return jsonify({"error": "No JSON payload"}), 400
          
     urls = data.get("urls")
     schema = data.get("schema")
 
     if not isinstance(urls, list) or not isinstance(schema, dict):
-        return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
+        return jsonify({"error": "Invalid input"}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
-    # --- NEW, BULLETPROOF CSS SELECTORS ---
-    # We now target data-qa attributes because they don't change when Noon updates their CSS
-    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        #js_code_before_wait=[JS_CLICK_SCRIPT],
-        #wait_for='#noon-other-offers-loaded',
-        wait_for=buy_box_wait_selector,
-        js_code=[JS_CLICK_SCRIPT],
-       
+        # We hook into Crawl4AI right after the page loads to do our native click!
+        page_hooks={"after_goto": [native_click_hook]}, 
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
@@ -155,7 +99,7 @@ def scrape():
         scan_full_page=False,
         magic=True,
         simulate_user=True,
-        page_timeout=180000 
+        page_timeout=60000 
     )
 
     async def run_scraper():
@@ -183,7 +127,6 @@ def scrape():
                     })
             return output
 
-    # --- THE CLEAN EXECUTION FIX ---
     try:
         result = asyncio.run(run_scraper())
         return jsonify(result) 
