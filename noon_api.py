@@ -52,30 +52,38 @@ new Promise((resolve) => {
         try {
             console.log("⏳ Starting execution...");
             
-            // Scan for 'Other Offers' button
+            // 1. Scan for button (Bilingual: English & Exact Arabic)
             let btn = null;
             for (let i = 0; i < 20; i++) {
-                btn = Array.from(document.querySelectorAll('*')).find(el => 
-                    el.innerText && 
-                    el.innerText.trim().toLowerCase().includes("more offers from other sellers") &&
-                    el.children.length === 0
-                );
+                btn = Array.from(document.querySelectorAll('*')).find(el => {
+                    if (!el.innerText || el.children.length > 0) return false;
+                    let text = el.innerText.trim().toLowerCase();
+                    return text.includes("offers from") || 
+                           text.includes("other sellers") || 
+                           text.includes("عروض أكثر من بائعين آخرين") || 
+                           text.includes("عروض أخرى");
+                });
+                
+                // Fallback to Noon's internal class name if text fails entirely
+                if (!btn) {
+                    btn = document.querySelector('[class*="slidingOptionsTrigger"]');
+                }
+
                 if (btn) break;
                 await new Promise(r => setTimeout(r, 100));
             }
 
             if (!btn) {
                 console.warn("⚠️ Button not detected. Product might be single-seller.");
-                resolve(true); // Releases Python instantly
+                resolve(true); 
                 return;
             }
 
-            // Target parent and Execute Click
+            // 2. Target parent and Execute Click
             const target = btn.parentElement || btn;
             console.log("🎯 Targeting element:", target);
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
             
-            // YOUR EXACT FIX: Non-blocking setTimeout to prevent UI crashing
             setTimeout(() => {
                 try {
                     target.click();
@@ -87,24 +95,15 @@ new Promise((resolve) => {
                 }
             }, 300);
 
-            // Wait for Content
+            // 3. Wait for Content (Using the exact CSS from our bulletproof schema)
             console.log("⏳ Checking for loaded offers...");
-            let offersCount = 0;
             for (let i = 0; i < 15; i++) {
-                const items = Array.from(document.querySelectorAll('*')).filter(el => 
-                    el.innerText && 
-                    el.innerText.includes("EGP") && 
-                    (el.innerText.includes("Sold by") || el.innerText.includes("Add To Cart"))
-                );
+                // Looking for the physical offer cards instead of language-specific text
+                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
                 
-                if (items.length > offersCount) {
-                    offersCount = items.length;
-                    console.log(`📡 Detected ${offersCount} offers so far...`);
-                }
-                
-                if (offersCount > 2) {
-                    console.log(`🎉 SUCCESS: ${offersCount} offers loaded.`);
-                    // Buffer to let React paint, then instantly release Python
+                if (cards.length > 0) {
+                    console.log(`🎉 SUCCESS: ${cards.length} offers loaded.`);
+                    // Buffer to let React paint the text inside the cards, then release Python
                     setTimeout(() => resolve(true), 800); 
                     return;
                 }
@@ -112,11 +111,11 @@ new Promise((resolve) => {
             }
 
             console.log("🏁 Loop finished without finding offers.");
-            resolve(true); // Failsafe release
+            resolve(true); 
 
         } catch (error) {
             console.error("❌ Exception caught:", error);
-            resolve(true); // Failsafe release
+            resolve(true); 
         }
     })();
 });
