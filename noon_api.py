@@ -34,6 +34,7 @@ browser_config = BrowserConfig(
     light_mode=True,
     user_data_dir="/app/chrome_cache",
     use_persistent_context=False,
+    headless=True,
     extra_args=[
         "--no-sandbox", 
         "--disable-gpu", 
@@ -46,94 +47,108 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE NATIVE PLAYWRIGHT CLICKER (Replaces the JS Script) ---
-async def native_click_hook(page, context, **kwargs):
-    print("⏳ [PYTHON HOOK] Searching for More Offers button...")
+# --- THE NATIVE PLAYWRIGHT CLICKER ---
+# This simulates a real OS-level mouse click to bypass Datadome
+async def native_click_hook(page, context, url, response, **kwargs):
+    print(f"⏳ [HOOK] Triggered for {url}. Searching for button...")
     try:
-        # 1. Target the button (Supports English, Arabic, and fallbacks)
         btn_selector = 'button:has-text("عروض أكثر من بائعين آخرين"), button:has-text("offers from"), button:has-text("other sellers"), [class*="slidingOptionsTrigger"]'
         
-        # 2. Wait up to 5 seconds for the button to exist
-        btn = page.locator(btn_selector).first
-        await btn.wait_for(state="visible", timeout=5000)
+        try:
+            # Wait up to 5 seconds for the Arabic/English button to render
+            btn = await page.wait_for_selector(btn_selector, state="visible", timeout=5000)
+        except Exception:
+            btn = None
+            
+        if not btn:
+            print("⚠️ [HOOK] Button not found. Product might be single-seller.")
+            return
+
+        print("🎯 [HOOK] Button found. Clicking natively...")
+        await btn.scroll_into_view_if_needed()
+        await page.wait_for_timeout(500)
         
-        # 3. NATIVE HARDWARE CLICK (Bypasses Datadome!)
-        print("🎯 [PYTHON HOOK] Button found. Clicking natively...")
+        # Native OS-level click (isTrusted: true)
         await btn.click()
         
-        # 4. Wait for YOUR exact schema baseSelector to load in the side panel
-        print("⏳ [PYTHON HOOK] Waiting for cards to load data...")
+        print("⏳ [HOOK] Waiting for offer cards to load data...")
         await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="visible", timeout=15000)
         
-        # Give React 1.5 seconds to paint the actual text inside the cards
+        # Give React 1.5 seconds to paint the EGP prices inside the cards
         await page.wait_for_timeout(1500)
-        print("🎉 [PYTHON HOOK] Cards loaded successfully!")
+        print("🎉 [HOOK] Cards loaded successfully!")
         
     except Exception as e:
-        print("⚠️ [PYTHON HOOK] Button not found or single seller product. Skipping click.")
+        print(f"⚠️ [HOOK] Error during execution: {e}")
 
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
-    data = request.get_json()
-    if not data: return jsonify({"error": "No JSON payload"}), 400
-         
-    urls = data.get("urls")
-    schema = data.get("schema")
-
-    if not isinstance(urls, list) or not isinstance(schema, dict):
-        return jsonify({"error": "Invalid input"}), 400
-
-    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-
-    config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        extraction_strategy=extraction_strategy,
-        # We hook into Crawl4AI right after the page loads to do our native click!
-        page_hooks={"after_goto": [native_click_hook]}, 
-        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
-        exclude_external_links=True,
-        exclude_social_media_links=True,
-        exclude_external_images=True,
-        screenshot=False, 
-        scan_full_page=False,
-        magic=True,
-        simulate_user=True,
-        page_timeout=60000 
-    )
-
-    async def run_scraper():
-        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
-            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
-            
-            output = []
-            for result in results:
-                if result.success:
-                    try:
-                        extracted = json.loads(result.extracted_content)
-                    except Exception:
-                        extracted = {"error": "Failed to parse extracted content"}
-                    
-                    output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "data": extracted
-                    })
-                else:
-                    output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "error": result.error_message
-                    })
-            return output
-
+    # 🔒 SECURE WRAPPER: Ensures Flask never throws an HTML 500 error again
     try:
+        data = request.get_json()
+        if not data: return jsonify({"error": "No JSON payload"}), 400
+             
+        urls = data.get("urls")
+        schema = data.get("schema")
+
+        if not isinstance(urls, list) or not isinstance(schema, dict):
+            return jsonify({"error": "Invalid input"}), 400
+
+        extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
+
+        # Removed the invalid page_hooks argument from here!
+        config = CrawlerRunConfig(
+            cache_mode=CacheMode.BYPASS,
+            extraction_strategy=extraction_strategy,
+            excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
+            exclude_external_links=True,
+            exclude_social_media_links=True,
+            exclude_external_images=True,
+            screenshot=False, 
+            scan_full_page=False,
+            magic=True,
+            simulate_user=True,
+            page_timeout=60000 
+        )
+
+        async def run_scraper():
+            async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
+                
+                # ✅ PROPER CRAWL4AI 0.9.0 HOOK ATTACHMENT
+                crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
+                
+                results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
+                
+                output = []
+                for result in results:
+                    if result.success:
+                        try:
+                            extracted = json.loads(result.extracted_content)
+                        except Exception:
+                            extracted = {"error": "Failed to parse extracted content"}
+                        
+                        output.append({
+                            "url": result.url, 
+                            "status": result.status_code, 
+                            "data": extracted
+                        })
+                    else:
+                        output.append({
+                            "url": result.url, 
+                            "status": result.status_code, 
+                            "error": result.error_message
+                        })
+                return output
+
         result = asyncio.run(run_scraper())
         return jsonify(result) 
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # If any Python code breaks, n8n gets a clean JSON error response
+        return jsonify({"error": f"Python Server Crash: {str(e)}"}), 500
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Noon production server with Waitress (Max 4 threads)...")
+    print("🚀 Starting Noon production server with Waitress (Native Click Bridge)...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
