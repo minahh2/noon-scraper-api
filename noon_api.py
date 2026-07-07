@@ -1,10 +1,8 @@
-import json
 import asyncio
 from flask import Flask, request, jsonify
 from crawl4ai import (
     AsyncWebCrawler,
     CrawlerRunConfig,
-    JsonCssExtractionStrategy,
     BrowserConfig,
     CacheMode
 )
@@ -30,10 +28,8 @@ browser_config = BrowserConfig(
     viewport_height=1080,
     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     user_agent_mode="random",
-    text_mode=True, 
+    text_mode=False, # Must be False to allow React to render fully
     light_mode=True,
-    user_data_dir="/app/chrome_cache",
-    use_persistent_context=False,
     headless=True,
     extra_args=[
         "--no-sandbox", 
@@ -47,14 +43,11 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE NATIVE POINTER HOOK ---
 async def native_click_hook(page, *args, **kwargs):
-    print("⏳ [HOOK] Initializing native memory pointer strategy...")
+    print("⏳ [DIAGNOSTIC HOOK] Initializing...")
     try:
-        # Let React fully hydrate the initial page view
         await page.wait_for_timeout(2000)
 
-        # JS finds the button and returns the raw DOM object natively to Python
         pointer_script = """() => {
             const keywords = ["offers from", "other sellers", "عروض أكثر", "عروض أخرى"];
             const elements = document.querySelectorAll('button, div, span, p');
@@ -62,42 +55,30 @@ async def native_click_hook(page, *args, **kwargs):
             for (let el of elements) {
                 let text = (el.innerText || el.textContent || "").trim().toLowerCase();
                 if (text.length >= 5 && text.length < 60 && keywords.some(kw => text.includes(kw))) {
-                    // Returns the button element itself!
                     return el.closest('button') || el.closest('[class*="Trigger"]') || el;
                 }
             }
             return document.querySelector('[class*="slidingOptionsTrigger"]');
         }"""
         
-        # Capture the DOM element directly into a Python variable
         element_handle = await page.evaluate_handle(pointer_script)
-        
-        # Check if the JS function returned null
         is_null = await element_handle.evaluate("node => node === null")
+        
         if is_null:
-            print("⚠️ [HOOK] Button not found on page. Skipping click.")
+            print("⚠️ [DIAGNOSTIC] Button not found.")
             return
 
-        print("🎯 [HOOK] Button captured in memory. Forcing hardware click...")
+        print("🎯 [DIAGNOSTIC] Clicking...")
         element = element_handle.as_element()
-        
-        # Bring it into view and crush it with a forced Playwright click
         await element.scroll_into_view_if_needed()
         await page.wait_for_timeout(500)
-        
         await element.click(force=True)
         
-        print("⏳ [HOOK] Canvas opening. Waiting for offers to load...")
-        # Wait for the exact cards your n8n schema uses
-        await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="attached", timeout=15000)
-        
-        # Give React 2 seconds to paint the Arabic/English prices inside the cards
-        await page.wait_for_timeout(2000)
-        print("🎉 [HOOK] Cards successfully loaded and populated!")
+        print("⏳ [DIAGNOSTIC] Waiting for 3 seconds to ensure panel is open...")
+        await page.wait_for_timeout(3000)
         
     except Exception as e:
-        print(f"❌ [HOOK] Exception encountered: {e}")
-
+        print(f"❌ [DIAGNOSTIC] Exception: {e}")
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
@@ -106,16 +87,13 @@ def scrape():
         if not data: return jsonify({"error": "No JSON payload"}), 400
              
         urls = data.get("urls")
-        schema = data.get("schema")
 
-        if not isinstance(urls, list) or not isinstance(schema, dict):
-            return jsonify({"error": "Invalid input"}), 400
+        if not isinstance(urls, list):
+            return jsonify({"error": "Invalid input: urls must be a list"}), 400
 
-        extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-
+        # Note: No schema strategy here. We just want raw HTML.
         config = CrawlerRunConfig(
             cache_mode=CacheMode.BYPASS,
-            extraction_strategy=extraction_strategy,
             excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
             exclude_external_links=True,
             exclude_social_media_links=True,
@@ -129,24 +107,18 @@ def scrape():
 
         async def run_scraper():
             async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
-                
-                # Attach the hook
                 crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
-                
                 results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
                 
                 output = []
                 for result in results:
                     if result.success:
-                        try:
-                            extracted = json.loads(result.extracted_content)
-                        except Exception:
-                            extracted = {"error": "Failed to parse extracted content"}
-                        
+                        # Return the RAW HTML string
                         output.append({
                             "url": result.url, 
                             "status": result.status_code, 
-                            "data": extracted
+                            "raw_html_length": len(result.html), # Check how big the HTML is
+                            "raw_html": result.html[:2000] # Return the first 2000 chars to verify
                         })
                     else:
                         output.append({
@@ -160,9 +132,9 @@ def scrape():
         return jsonify(result) 
         
     except Exception as e:
-        return jsonify({"error": f"Python Server Crash: {str(e)}"}), 500
+        return jsonify({"error": f"Python Crash: {str(e)}"}), 500
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Noon production server with Waitress (Native Pointer Bridge)...")
+    print("🚀 Starting Diagnostic Server...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
