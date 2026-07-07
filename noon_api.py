@@ -47,44 +47,62 @@ browser_config = BrowserConfig(
     ]
 )
 
-# --- THE NATIVE PLAYWRIGHT CLICKER ---
-# This simulates a real OS-level mouse click to bypass Datadome
-async def native_click_hook(page, context, url, response, **kwargs):
-    print(f"⏳ [HOOK] Triggered for {url}. Searching for button...")
+# --- THE HYBRID CLICKER HOOK ---
+# JS finds the button. Playwright forces the hardware click.
+async def native_click_hook(page, *args, **kwargs):
+    print("⏳ [HOOK] Initializing hybrid click strategy...")
     try:
-        btn_selector = 'button:has-text("عروض أكثر من بائعين آخرين"), button:has-text("offers from"), button:has-text("other sellers"), [class*="slidingOptionsTrigger"]'
-        
-        try:
-            # Wait up to 5 seconds for the Arabic/English button to render
-            btn = await page.wait_for_selector(btn_selector, state="visible", timeout=5000)
-        except Exception:
-            btn = None
+        # 1. Give the page a moment to fully render the React DOM
+        await page.wait_for_timeout(2000)
+
+        # 2. JS traverses the DOM to find the exact button and tags it with an ID
+        tag_script = """() => {
+            const keywords = ["offers from", "other sellers", "عروض أكثر من بائعين آخرين", "عروض أخرى"];
+            const elements = document.querySelectorAll('button, div, span, p');
             
-        if not btn:
-            print("⚠️ [HOOK] Button not found. Product might be single-seller.")
+            for (let el of elements) {
+                let text = (el.innerText || el.textContent || "").trim().toLowerCase();
+                if (text.length > 5 && text.length < 60 && keywords.some(kw => text.includes(kw))) {
+                    let btn = el.closest('button') || el.closest('[class*="Trigger"]') || el;
+                    btn.setAttribute('id', 'NOON_TARGET_BUTTON');
+                    return true;
+                }
+            }
+            
+            let fallback = document.querySelector('[class*="slidingOptionsTrigger"]');
+            if (fallback) {
+                fallback.setAttribute('id', 'NOON_TARGET_BUTTON');
+                return true;
+            }
+            return false;
+        }"""
+        
+        found = await page.evaluate(tag_script)
+        
+        if not found:
+            print("⚠️ [HOOK] Button not found by Javascript. Skipping click.")
             return
 
-        print("🎯 [HOOK] Button found. Clicking natively...")
-        await btn.scroll_into_view_if_needed()
-        await page.wait_for_timeout(500)
+        print("🎯 [HOOK] Button targeted. Executing forced hardware click...")
+        target = page.locator('#NOON_TARGET_BUTTON').first
         
-        # Native OS-level click (isTrusted: true)
-        await btn.click()
+        # force=True BYPASSES all invisible cookie banners and location popups!
+        await target.click(force=True)
         
-        print("⏳ [HOOK] Waiting for offer cards to load data...")
-        await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="visible", timeout=15000)
+        print("⏳ [HOOK] Waiting for offer cards to hydrate...")
+        # Wait for the exact cards your schema is looking for to appear
+        await page.wait_for_selector('a[class*="_card_"][href*="?o="]', state="attached", timeout=15000)
         
-        # Give React 1.5 seconds to paint the EGP prices inside the cards
-        await page.wait_for_timeout(1500)
-        print("🎉 [HOOK] Cards loaded successfully!")
+        # Give React 2 full seconds to paint the EGP prices inside the cards
+        await page.wait_for_timeout(2000)
+        print("🎉 [HOOK] Cards successfully loaded and hydrated!")
         
     except Exception as e:
-        print(f"⚠️ [HOOK] Error during execution: {e}")
+        print(f"❌ [HOOK] Exception encountered: {e}")
 
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
-    # 🔒 SECURE WRAPPER: Ensures Flask never throws an HTML 500 error again
     try:
         data = request.get_json()
         if not data: return jsonify({"error": "No JSON payload"}), 400
@@ -97,7 +115,6 @@ def scrape():
 
         extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
 
-        # Removed the invalid page_hooks argument from here!
         config = CrawlerRunConfig(
             cache_mode=CacheMode.BYPASS,
             extraction_strategy=extraction_strategy,
@@ -115,7 +132,7 @@ def scrape():
         async def run_scraper():
             async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
                 
-                # ✅ PROPER CRAWL4AI 0.9.0 HOOK ATTACHMENT
+                # Attach our Hybrid Hook
                 crawler.crawler_strategy.set_hook("after_goto", native_click_hook)
                 
                 results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
@@ -145,10 +162,9 @@ def scrape():
         return jsonify(result) 
         
     except Exception as e:
-        # If any Python code breaks, n8n gets a clean JSON error response
         return jsonify({"error": f"Python Server Crash: {str(e)}"}), 500
 
 if __name__ == '__main__':
     from waitress import serve
-    print("🚀 Starting Noon production server with Waitress (Native Click Bridge)...")
+    print("🚀 Starting Noon production server with Waitress (Hybrid Click Bridge)...")
     serve(app, host='0.0.0.0', port=5000, threads=4)
