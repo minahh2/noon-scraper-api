@@ -52,7 +52,7 @@ return new Promise((resolve) => {
         try {
             let mainLoaded = false;
             for (let i = 0; i < 40; i++) { 
-                if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
+                if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"], [class*="productTitle"]')) {
                     mainLoaded = true;
                     break;
                 }
