@@ -89,6 +89,10 @@ JS_CLICK_SCRIPT = """
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await new Promise(r => setTimeout(r, 600)); 
         
+        // CRITICAL FIX: Prevent native navigation which destroys the DOM and triggers Cloudflare
+        if (btn.hasAttribute('href')) {
+            btn.removeAttribute('href');
+        }
         btn.click();
         
         for (let i = 0; i < 20; i++) {
