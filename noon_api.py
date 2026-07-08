@@ -145,13 +145,15 @@ def scrape():
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted
+                        "data": extracted,
+                        "html_preview": result.html[:300] if result.html else "NO HTML"
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message
+                        "error": result.error_message,
+                        "html_preview": result.html[:300] if result.html else "NO HTML"
                     })
             return output
 
