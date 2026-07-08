@@ -48,6 +48,11 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 (async function() {
+    function setDebug(msg) {
+        let brandEl = document.querySelector('[data-qa="brand-name"], [class*="brandName"]');
+        if (brandEl) brandEl.textContent = "DEBUG: " + msg;
+    }
+
     let mainLoaded = false;
     for (let i = 0; i < 40; i++) { 
         if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
@@ -57,14 +62,16 @@ JS_CLICK_SCRIPT = """
         await new Promise(r => setTimeout(r, 500));
     }
 
-    if (!mainLoaded) return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
+    if (!mainLoaded) {
+        setDebug("TIMEOUT_MAIN_PAGE");
+        return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
+    }
 
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     
-    // Scan for button (Extremely robust for all Arabic/English translations)
     let btn = null;
     const allElements = document.querySelectorAll('*');
     for (let i = 0; i < allElements.length; i++) {
@@ -88,24 +95,26 @@ JS_CLICK_SCRIPT = """
 
     if (btn) {
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await new Promise(r => setTimeout(r, 600)); 
+        await new Promise(r => setTimeout(r, 1500)); // wait for react hydration
         
-        // CRITICAL FIX: Prevent native navigation which destroys the DOM and triggers Cloudflare
-        if (btn.hasAttribute('href')) {
-            btn.removeAttribute('href');
-        }
-        btn.click();
+        if (btn.hasAttribute('href')) btn.removeAttribute('href');
         
-        for (let i = 0; i < 20; i++) {
+        // Try clicking multiple times (fixes React delayed hydration)
+        for(let j = 0; j < 3; j++) {
+            btn.click();
+            await new Promise(r => setTimeout(r, 1000));
+            
             const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
             if (cards.length > 0) {
                 await new Promise(r => setTimeout(r, 1500));
                 return "SUCCESS_CARDS_LOADED";
             }
-            await new Promise(r => setTimeout(r, 200));
         }
+        
+        setDebug("TIMEOUT_NO_CARDS");
         return "TIMEOUT_NO_CARDS_AFTER_CLICK";
     } else {
+        setDebug("NO_BUTTON_FOUND");
         return "NO_BUTTON_FOUND";
     }
 })();
