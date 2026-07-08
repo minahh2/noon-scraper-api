@@ -116,9 +116,9 @@ JS_CLICK_SCRIPT = """
                         rating: ratingEl ? ratingEl.innerText.trim() : ""
                     });
                 });
-                let script = document.createElement("script");
-                script.type = "application/json";
+                let script = document.createElement("span");
                 script.id = "extracted-offers-json";
+                script.style.display = "none";
                 script.textContent = JSON.stringify(extractedOffers);
                 document.head.appendChild(script);
                 
