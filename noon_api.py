@@ -109,7 +109,7 @@ def scrape():
         extraction_strategy=extraction_strategy,
         wait_for=buy_box_wait_selector,
         js_code=JS_CLICK_SCRIPT,
-        delay_before_return_html=2500, # Give react time to paint the offers
+        delay_before_return_html=2.5, # Give react time to paint the offers
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
