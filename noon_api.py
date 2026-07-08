@@ -125,14 +125,14 @@ def scrape():
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
         wait_for=buy_box_wait_selector,
-        js_code=JS_CLICK_SCRIPT,
+        js_code=[JS_CLICK_SCRIPT],
         delay_before_return_html=2.5, # Give react time to paint the offers
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
         screenshot=False, 
-        scan_full_page=False,
+        scan_full_page=True,
         magic=True,
         simulate_user=True,
         page_timeout=180000 
