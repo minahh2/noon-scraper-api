@@ -48,11 +48,6 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 (async function() {
-    function setDebug(msg) {
-        const els = document.querySelectorAll('[class*="_linkList_"] [class*="_innerLinkText_"], [class*="SupportDetails"]');
-        if (els.length > 0) els[0].innerText = "DEBUG: " + msg;
-    }
-
     let mainLoaded = false;
     for (let i = 0; i < 40; i++) { 
         if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
@@ -62,17 +57,33 @@ JS_CLICK_SCRIPT = """
         await new Promise(r => setTimeout(r, 500));
     }
 
-    if (!mainLoaded) {
-        setDebug("TIMEOUT_MAIN_PAGE_NOT_LOADED");
-        return;
-    }
+    if (!mainLoaded) return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
 
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     
-    let btn = document.querySelector('[class*="_offerCtr_"], [class*="OffersFromOtherSellers"]');
+    // Scan for button (Extremely robust for all Arabic/English translations)
+    let btn = null;
+    const allElements = document.querySelectorAll('*');
+    for (let i = 0; i < allElements.length; i++) {
+        let el = allElements[i];
+        if (el.innerText && el.children.length === 0) {
+            let text = el.innerText.trim().toLowerCase();
+            if (
+                text.includes("offers from") || 
+                text.includes("other sellers") || 
+                (text.includes("عروض") && text.includes("بائعين")) ||
+                (text.includes("عروض") && text.includes("أخرى")) ||
+                (text.includes("مزيد") && text.includes("عروض")) ||
+                text === "عروض أخرى"
+            ) {
+                btn = el.parentElement || el;
+                break;
+            }
+        }
+    }
 
     if (btn) {
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -84,14 +95,13 @@ JS_CLICK_SCRIPT = """
             const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
             if (cards.length > 0) {
                 await new Promise(r => setTimeout(r, 1500));
-                setDebug("SUCCESS_CARDS_LOADED_COUNT_" + cards.length);
-                return;
+                return "SUCCESS_CARDS_LOADED";
             }
             await new Promise(r => setTimeout(r, 200));
         }
-        setDebug("TIMEOUT_NO_CARDS_AFTER_CLICK");
+        return "TIMEOUT_NO_CARDS_AFTER_CLICK";
     } else {
-        setDebug("NO_BUTTON_FOUND_WITH_CLASS");
+        return "NO_BUTTON_FOUND";
     }
 })();
 """
