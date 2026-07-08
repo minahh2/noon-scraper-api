@@ -195,27 +195,38 @@ def scrape():
                         # Inject our natively extracted JS data to bypass strategy bugs
                         soup = BeautifulSoup(result.html, 'html.parser')
                         meta_tag = soup.find("meta", {"name": "extracted-offers-json"})
+                        native_offers = [{"debug_error": "meta_tag_not_found_in_python"}]
+                        
                         if meta_tag and meta_tag.get("content"):
                             json_text = meta_tag["content"]
                             if json_text:
-                                native_offers = json.loads(json_text)
-                                if isinstance(extracted, list) and len(extracted) > 0:
-                                    extracted[0]["other_offers"] = native_offers
-                                elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
-                                    extracted["data"][0]["other_offers"] = native_offers
+                                try:
+                                    native_offers = json.loads(json_text)
+                                except Exception as e:
+                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
+                        
+                        if isinstance(extracted, list) and len(extracted) > 0:
+                            extracted[0]["other_offers"] = native_offers
+                        elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
+                            extracted["data"][0]["other_offers"] = native_offers
+                        else:
+                            extracted = {"original": extracted, "other_offers": native_offers}
+                            
                     except Exception as e:
                         extracted = {"error": "Failed to parse content: " + str(e)}
                     
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted
+                        "data": extracted,
+                        "html_preview": result.html[:500] if result.html else "NO HTML"
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message
+                        "error": result.error_message,
+                        "html_preview": result.html[:500] if result.html else "NO HTML"
                     })
             return output
 
