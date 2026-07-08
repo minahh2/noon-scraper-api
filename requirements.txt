@@ -1,5 +1,5 @@
 Flask[async]
-crawl4ai
+crawl4ai==0.8.7
 playwright
 waitress
 playwright-stealth
