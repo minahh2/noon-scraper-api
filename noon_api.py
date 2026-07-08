@@ -81,10 +81,10 @@ JS_CLICK_SCRIPT = """
             if (text.length > 0 && (
                 text.includes("offers from") || 
                 text.includes("other sellers") || 
-                (text.includes("عروض") && text.includes("بائعين")) ||
-                (text.includes("عروض") && text.includes("أخرى")) ||
-                (text.includes("مزيد") && text.includes("عروض")) ||
-                text === "عروض أخرى"
+                text.includes("\\u0639\\u0631\\u0648\\u0636") || 
+                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
+                text.includes("\\u0623\\u062e\\u0631\\u0649") ||
+                text.includes("\\u0645\\u0632\\u064a\\u062f")
             )) {
                 btn = el.parentElement || el;
                 break;
@@ -93,42 +93,46 @@ JS_CLICK_SCRIPT = """
     }
 
     if (btn) {
-        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await new Promise(r => setTimeout(r, 1500)); 
-        
-        if (btn.hasAttribute('href')) btn.removeAttribute('href');
-        
-        for(let j = 0; j < 3; j++) {
-            btn.click();
-            await new Promise(r => setTimeout(r, 1000));
+        try {
+            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await new Promise(r => setTimeout(r, 1500)); 
             
-            const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
-            if (cards.length > 0) {
-                // Manually extract cards to bypass BeautifulSoup/Schema limitations
-                let extractedOffers = [];
-                cards.forEach(card => {
-                    let nameEl = card.querySelector('[class*="_sellerName_"]');
-                    let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
-                    let ratingEl = card.querySelector('[class*="_textValue_"]');
-                    extractedOffers.push({
-                        seller_name: nameEl ? nameEl.innerText.trim() : "",
-                        price: priceEl ? priceEl.innerText.trim() : "",
-                        rating: ratingEl ? ratingEl.innerText.trim() : ""
-                    });
-                });
-                let script = document.createElement("span");
-                script.id = "extracted-offers-json";
-                script.style.display = "none";
-                script.textContent = JSON.stringify(extractedOffers);
-                document.head.appendChild(script);
-                
+            if (btn.hasAttribute('href')) btn.removeAttribute('href');
+            
+            for(let j = 0; j < 3; j++) {
+                btn.click();
                 await new Promise(r => setTimeout(r, 1000));
-                return "SUCCESS_CARDS_LOADED";
+                
+                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
+                if (cards.length > 0) {
+                    let extractedOffers = [];
+                    cards.forEach(card => {
+                        let nameEl = card.querySelector('[class*="_sellerName_"]');
+                        let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
+                        let ratingEl = card.querySelector('[class*="_textValue_"]');
+                        extractedOffers.push({
+                            seller_name: nameEl ? nameEl.innerText.trim() : "",
+                            price: priceEl ? priceEl.innerText.trim() : "",
+                            rating: ratingEl ? ratingEl.innerText.trim() : ""
+                        });
+                    });
+                    
+                    let meta = document.createElement("meta");
+                    meta.name = "extracted-offers-json";
+                    meta.content = JSON.stringify(extractedOffers);
+                    document.head.appendChild(meta);
+                    
+                    await new Promise(r => setTimeout(r, 1000));
+                    return "SUCCESS_CARDS_LOADED";
+                }
             }
+            
+            setDebug("TIMEOUT_NO_CARDS_AFTER_3_CLICKS");
+            return "TIMEOUT_NO_CARDS_AFTER_CLICK";
+        } catch (err) {
+            setDebug("JS_CRASH: " + err.toString());
+            return "JS_CRASH";
         }
-        
-        setDebug("TIMEOUT_NO_CARDS_AFTER_3_CLICKS");
-        return "TIMEOUT_NO_CARDS_AFTER_CLICK";
     } else {
         setDebug("NO_BUTTON_FOUND");
         return "NO_BUTTON_FOUND";
@@ -179,9 +183,9 @@ def scrape():
                         extracted = json.loads(result.extracted_content)
                         # Inject our natively extracted JS data to bypass strategy bugs
                         soup = BeautifulSoup(result.html, 'html.parser')
-                        offers_div = soup.find(id="extracted-offers-json")
-                        if offers_div:
-                            json_text = offers_div.get_text(strip=True)
+                        meta_tag = soup.find("meta", {"name": "extracted-offers-json"})
+                        if meta_tag and meta_tag.get("content"):
+                            json_text = meta_tag["content"]
                             if json_text:
                                 native_offers = json.loads(json_text)
                                 if isinstance(extracted, list) and len(extracted) > 0:
