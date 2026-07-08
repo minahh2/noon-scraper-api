@@ -107,7 +107,7 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        wait_for=f"css:{buy_box_wait_selector}",
+        wait_for=buy_box_wait_selector,
         js_code=JS_CLICK_SCRIPT,
         delay_before_return_html=2500, # Give react time to paint the offers
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
