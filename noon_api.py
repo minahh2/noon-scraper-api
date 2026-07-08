@@ -161,7 +161,6 @@ def scrape():
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        js_code=[JS_CLICK_SCRIPT],
         delay_before_return_html=2.5, 
         excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
         remove_overlay_elements=True,
@@ -185,55 +184,38 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        # Extract natively from JS result bypassing the DOM entirely
-                        native_offers = [{"debug_error": "js_result_not_found"}]
+                        # Extract entirely from __NEXT_DATA__ bypassing all UI interactions
+                        native_offers = [{"debug_error": "next_data_not_found"}]
                         
-                        js_res = getattr(result, "js_execution_result", None)
-                        if js_res:
-                            js_str = str(js_res)
-                            if "|||EXTRACTED_OFFERS|||" in js_str:
-                                json_text = js_str.split("|||EXTRACTED_OFFERS|||")[1].split("|||END|||")[0]
+                        try:
+                            from bs4 import BeautifulSoup
+                            soup = BeautifulSoup(result.html, 'html.parser')
+                            next_data = soup.find('script', id='__NEXT_DATA__')
+                            if next_data and next_data.string:
+                                next_json = json.loads(next_data.string)
+                                sellers = []
                                 try:
-                                    native_offers = json.loads(json_text)
-                                except Exception as e:
-                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
+                                    product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
+                                    if not product:
+                                        product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
+                                        
+                                    offers = product.get('offers', [])
+                                    for offer in offers:
+                                        sellers.append({
+                                            "seller_name": str(offer.get('storeName', offer.get('sellerName', ''))),
+                                            "price": str(offer.get('price', '')),
+                                            "rating": str(offer.get('sellerRating', ''))
+                                        })
+                                    if len(sellers) > 0:
+                                        native_offers = sellers
+                                    else:
+                                        native_offers = [{"debug_error": "Found NEXT_DATA but no offers array"}]
+                                except Exception as inner_e:
+                                    native_offers = [{"debug_error": "Error traversing NEXT_DATA: " + str(inner_e)}]
                             else:
-                                native_offers = [{"debug_error": "js_result_did_not_contain_json: " + js_str[:200]}]
-                        else:
-                            native_offers = [{"debug_error": "js_execution_result_is_none"}]
-                            
-                        # FALLBACK: Extract from __NEXT_DATA__ if JS click failed
-                        if len(native_offers) > 0 and "debug_error" in native_offers[0]:
-                            try:
-                                soup = BeautifulSoup(result.html, 'html.parser')
-                                next_data = soup.find('script', id='__NEXT_DATA__')
-                                if next_data and next_data.string:
-                                    next_json = json.loads(next_data.string)
-                                    # Noon's __NEXT_DATA__ usually contains product info deep inside props.pageProps.catalog.product
-                                    # We can try to traverse it to find sellers
-                                    # Since structure varies, we'll serialize the seller names if we find them
-                                    sellers = []
-                                    try:
-                                        product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
-                                        if not product:
-                                            # Alternative path
-                                            product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
-                                            
-                                        offers = product.get('offers', [])
-                                        for offer in offers:
-                                            sellers.append({
-                                                "seller_name": offer.get('storeName', offer.get('sellerName', '')),
-                                                "price": str(offer.get('price', '')),
-                                                "rating": str(offer.get('sellerRating', ''))
-                                            })
-                                        if len(sellers) > 0:
-                                            native_offers = sellers
-                                        else:
-                                            native_offers[0]["next_data_status"] = "Found NEXT_DATA but no offers array"
-                                    except Exception as inner_e:
-                                        native_offers[0]["next_data_status"] = "Error traversing NEXT_DATA: " + str(inner_e)
-                            except Exception as e:
-                                pass
+                                native_offers = [{"debug_error": "No __NEXT_DATA__ script tag found in HTML"}]
+                        except Exception as e:
+                            native_offers = [{"debug_error": "Python exception: " + str(e)}]
                             
                         if isinstance(extracted, list) and len(extracted) > 0:
                             extracted[0]["other_offers"] = native_offers
