@@ -132,22 +132,17 @@ JS_CLICK_SCRIPT = """
                             price: priceEl ? priceEl.innerText.trim() : "",
                             rating: ratingEl ? ratingEl.innerText.trim() : ""
                         });
-                    });
-                    
-                    document.documentElement.setAttribute("data-extracted-offers", JSON.stringify(extractedOffers));
+                    let jsonStr = JSON.stringify(extractedOffers);
                     await new Promise(r => setTimeout(r, 1000));
-                    return "SUCCESS_CARDS_LOADED";
+                    return "|||EXTRACTED_OFFERS|||" + jsonStr + "|||END|||";
                 }
             }
             
-            setDebug("TIMEOUT_NO_CARDS_AFTER_CLICKS");
             return "TIMEOUT_NO_CARDS_AFTER_CLICK";
         } catch (err) {
-            setDebug("JS_CRASH: " + err.toString());
-            return "JS_CRASH";
+            return "JS_CRASH: " + err.toString();
         }
     } else {
-        setDebug("NO_BUTTON_FOUND");
         return "NO_BUTTON_FOUND";
     }
 })();
@@ -194,23 +189,23 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        # Inject our natively extracted JS data to bypass strategy bugs
-                        soup = BeautifulSoup(result.html, 'html.parser')
-                        html_tag = soup.find('html')
-                        native_offers = [{"debug_error": "html_tag_not_found"}]
+                        # Extract natively from JS result bypassing the DOM entirely
+                        native_offers = [{"debug_error": "js_result_not_found"}]
                         
-                        if html_tag:
-                            if html_tag.has_attr("data-debug-error"):
-                                native_offers = [{"debug_error": html_tag["data-debug-error"]}]
-                            elif html_tag.has_attr("data-extracted-offers"):
-                                json_text = html_tag["data-extracted-offers"]
+                        js_res = getattr(result, "js_execution_result", None)
+                        if js_res:
+                            js_str = str(js_res)
+                            if "|||EXTRACTED_OFFERS|||" in js_str:
+                                json_text = js_str.split("|||EXTRACTED_OFFERS|||")[1].split("|||END|||")[0]
                                 try:
                                     native_offers = json.loads(json_text)
                                 except Exception as e:
                                     native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
                             else:
-                                native_offers = [{"debug_error": "data_attr_not_found_on_html_tag"}]
-                        
+                                native_offers = [{"debug_error": "js_result_did_not_contain_json: " + js_str[:200]}]
+                        else:
+                            native_offers = [{"debug_error": "js_execution_result_is_none"}]
+                            
                         if isinstance(extracted, list) and len(extracted) > 0:
                             extracted[0]["other_offers"] = native_offers
                         elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
