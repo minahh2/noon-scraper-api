@@ -132,7 +132,7 @@ def scrape():
         exclude_social_media_links=True,
         exclude_external_images=True,
         screenshot=False, 
-        scan_full_page=True,
+        scan_full_page=False,
         magic=True,
         simulate_user=True,
         page_timeout=180000 
