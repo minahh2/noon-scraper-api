@@ -73,17 +73,7 @@ return new Promise((resolve) => {
             
             // Poll for the React DOM to render
             while (attempts < 10) {
-                // Try to find the button strictly by CSS classes related to sellers
-                let container = document.querySelector('[class*="OffersFromOtherSellers"], [class*="otherSellers"]');
-                if (container) {
-                    let possibleBtn = container.querySelector('button') || container;
-                    if (possibleBtn) {
-                        btn = possibleBtn;
-                        break;
-                    }
-                }
-                
-                // Fallback to strict text matching
+                // Strict text matching on leaf nodes
                 const allElements = document.querySelectorAll('button, div, span, p');
                 for (let i = 0; i < allElements.length; i++) {
                     let el = allElements[i];
@@ -91,12 +81,14 @@ return new Promise((resolve) => {
                         let rawText = el.textContent || el.innerText || "";
                         let text = rawText.trim().toLowerCase();
                         if (text.length > 0 && (
-                            text.includes("offers from") || 
+                            text === "offers from" ||
                             text.includes("other sellers") || 
                             text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0645\\u0646") || 
-                            text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646")
+                            text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
+                            text.includes("offers") && text.includes("other") ||
+                            text.includes("new from")
                         )) {
-                            btn = el.closest('button') || el.parentElement || el;
+                            btn = el.closest('button') || el;
                             break;
                         }
                     }
