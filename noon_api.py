@@ -47,106 +47,100 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-(async function() {
-    function setDebug(msg) {
-        document.body.innerHTML = '<h1>DEBUG_NOON_API: ' + msg + '</h1>';
-    }
-
-    let mainLoaded = false;
-    for (let i = 0; i < 40; i++) { 
-        if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
-            mainLoaded = true;
-            break;
-        }
-        await new Promise(r => setTimeout(r, 500));
-    }
-
-    if (!mainLoaded) {
-        setDebug("TIMEOUT_MAIN_PAGE");
-        return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
-    }
-
-    window.scrollBy(0, 800);
-    await new Promise(r => setTimeout(r, 600));
-    window.scrollBy(0, 800);
-    await new Promise(r => setTimeout(r, 600));
-    
-    let btn = null;
-    let attempts = 0;
-    
-    // Poll for the React DOM to render
-    while (attempts < 10) {
-        const allElements = document.querySelectorAll('*');
-        for (let i = 0; i < allElements.length; i++) {
-            let el = allElements[i];
-            if (el.children.length === 0) {
-                let rawText = el.textContent || el.innerText || "";
-                let text = rawText.trim().toLowerCase();
-                if (text.length > 0 && (
-                    text.includes("offers from") || 
-                    text.includes("other sellers") || 
-                    text.includes("\\u0639\\u0631\\u0648\\u0636") || 
-                    text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
-                    text.includes("\\u0623\\u062e\\u0631\\u0649") ||
-                    text.includes("\\u0645\\u0632\\u064a\\u062f")
-                )) {
-                    btn = el.closest('button') || el.parentElement || el;
+return new Promise((resolve) => {
+    (async function() {
+        try {
+            let mainLoaded = false;
+            for (let i = 0; i < 40; i++) { 
+                if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
+                    mainLoaded = true;
                     break;
                 }
+                await new Promise(r => setTimeout(r, 500));
             }
-        }
-        
-        if (btn) break;
-        await new Promise(r => setTimeout(r, 1000));
-        attempts++;
-    }
 
-    function setDebug(msg) {
-        document.documentElement.setAttribute("data-debug-error", msg);
-    }
+            if (!mainLoaded) {
+                return resolve("TIMEOUT_MAIN_PAGE_NOT_LOADED");
+            }
 
-    if (btn) {
-        try {
-            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            await new Promise(r => setTimeout(r, 2000)); 
+            window.scrollBy(0, 800);
+            await new Promise(r => setTimeout(r, 600));
+            window.scrollBy(0, 800);
+            await new Promise(r => setTimeout(r, 600));
             
-            if (btn.hasAttribute('href')) btn.removeAttribute('href');
+            let btn = null;
+            let attempts = 0;
             
-            for(let j = 0; j < 4; j++) {
-                // Dispatch full React synthetic event chain
-                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-                btn.click();
-                
-                await new Promise(r => setTimeout(r, 1000));
-                
-                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
-                if (cards.length > 0) {
-                    let extractedOffers = [];
-                    cards.forEach(card => {
-                        let nameEl = card.querySelector('[class*="_sellerName_"]');
-                        let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
-                        let ratingEl = card.querySelector('[class*="_textValue_"]');
-                        extractedOffers.push({
-                            seller_name: nameEl ? nameEl.innerText.trim() : "",
-                            price: priceEl ? priceEl.innerText.trim() : "",
-                            rating: ratingEl ? ratingEl.innerText.trim() : ""
-                        });
-                    let jsonStr = JSON.stringify(extractedOffers);
-                    await new Promise(r => setTimeout(r, 1000));
-                    return "|||EXTRACTED_OFFERS|||" + jsonStr + "|||END|||";
+            // Poll for the React DOM to render
+            while (attempts < 10) {
+                const allElements = document.querySelectorAll('*');
+                for (let i = 0; i < allElements.length; i++) {
+                    let el = allElements[i];
+                    if (el.children.length === 0) {
+                        let rawText = el.textContent || el.innerText || "";
+                        let text = rawText.trim().toLowerCase();
+                        if (text.length > 0 && (
+                            text.includes("offers from") || 
+                            text.includes("other sellers") || 
+                            text.includes("\\u0639\\u0631\\u0648\\u0636") || 
+                            text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
+                            text.includes("\\u0623\\u062e\\u0631\\u0649") ||
+                            text.includes("\\u0645\\u0632\\u064a\\u062f")
+                        )) {
+                            btn = el.closest('button') || el.parentElement || el;
+                            break;
+                        }
+                    }
                 }
+                
+                if (btn) break;
+                await new Promise(r => setTimeout(r, 1000));
+                attempts++;
             }
-            
-            return "TIMEOUT_NO_CARDS_AFTER_CLICK";
+
+            if (btn) {
+                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await new Promise(r => setTimeout(r, 2000)); 
+                
+                if (btn.hasAttribute('href')) btn.removeAttribute('href');
+                
+                for(let j = 0; j < 4; j++) {
+                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    btn.click();
+                    
+                    await new Promise(r => setTimeout(r, 1000));
+                    
+                    const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
+                    if (cards.length > 0) {
+                        let extractedOffers = [];
+                        cards.forEach(card => {
+                            let nameEl = card.querySelector('[class*="_sellerName_"]');
+                            let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
+                            let ratingEl = card.querySelector('[class*="_textValue_"]');
+                            extractedOffers.push({
+                                seller_name: nameEl ? nameEl.innerText.trim() : "",
+                                price: priceEl ? priceEl.innerText.trim() : "",
+                                rating: ratingEl ? ratingEl.innerText.trim() : ""
+                            });
+                        });
+                        let jsonStr = JSON.stringify(extractedOffers);
+                        await new Promise(r => setTimeout(r, 1000));
+                        return resolve("|||EXTRACTED_OFFERS|||" + jsonStr + "|||END|||");
+                    }
+                }
+                
+                return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK");
+            } else {
+                return resolve("NO_BUTTON_FOUND");
+            }
         } catch (err) {
-            return "JS_CRASH: " + err.toString();
+            return resolve("JS_CRASH: " + err.toString());
         }
-    } else {
-        return "NO_BUTTON_FOUND";
-    }
-})();
+    })();
+});
 """
+
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
