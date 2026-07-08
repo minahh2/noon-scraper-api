@@ -69,16 +69,17 @@ JS_CLICK_SCRIPT = """
     const allElements = document.querySelectorAll('*');
     for (let i = 0; i < allElements.length; i++) {
         let el = allElements[i];
-        if (el.innerText && el.children.length === 0) {
-            let text = el.innerText.trim().toLowerCase();
-            if (
+        if (el.children.length === 0) {
+            let rawText = el.textContent || el.innerText || "";
+            let text = rawText.trim().toLowerCase();
+            if (text.length > 0 && (
                 text.includes("offers from") || 
                 text.includes("other sellers") || 
                 (text.includes("عروض") && text.includes("بائعين")) ||
                 (text.includes("عروض") && text.includes("أخرى")) ||
                 (text.includes("مزيد") && text.includes("عروض")) ||
                 text === "عروض أخرى"
-            ) {
+            )) {
                 btn = el.parentElement || el;
                 break;
             }
