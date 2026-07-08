@@ -116,10 +116,11 @@ JS_CLICK_SCRIPT = """
                         rating: ratingEl ? ratingEl.innerText.trim() : ""
                     });
                 });
-                let div = document.createElement("div");
-                div.id = "extracted-offers-json";
-                div.innerText = JSON.stringify(extractedOffers);
-                document.body.appendChild(div);
+                let script = document.createElement("script");
+                script.type = "application/json";
+                script.id = "extracted-offers-json";
+                script.textContent = JSON.stringify(extractedOffers);
+                document.head.appendChild(script);
                 
                 await new Promise(r => setTimeout(r, 1000));
                 return "SUCCESS_CARDS_LOADED";
