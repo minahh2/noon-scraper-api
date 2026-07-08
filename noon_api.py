@@ -47,8 +47,14 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-(function() {
-    // 1. Scan for button (Bilingual: English & Exact Arabic)
+(async function() {
+    // 1. Scroll down to trigger lazy loading of the button
+    window.scrollBy(0, 600);
+    await new Promise(r => setTimeout(r, 500));
+    window.scrollBy(0, 600);
+    await new Promise(r => setTimeout(r, 500));
+    
+    // 2. Scan for button (Bilingual: English & Exact Arabic)
     let btn = null;
     const allElements = document.querySelectorAll('*');
     for (let i = 0; i < allElements.length; i++) {
@@ -65,23 +71,34 @@ JS_CLICK_SCRIPT = """
         }
     }
 
-    // Fallback to Noon's internal class name if text fails entirely
     if (!btn) {
         btn = document.querySelector('[class*="slidingOptionsTrigger"]');
     }
 
     if (btn) {
-        console.log("🎯 Targeting element:", btn);
-        const target = btn.parentElement || btn;
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 3. Scroll to button and click
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 500)); // wait for smooth scroll
         
-        // Execute click
+        const target = btn.parentElement || btn;
         target.click();
         target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
         target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
         if (typeof target.onclick === 'function') target.onclick();
+        
+        // 4. Wait for the cards to dynamically inject into the DOM
+        for (let i = 0; i < 20; i++) {
+            const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
+            if (cards.length > 0) {
+                // Buffer to let React paint the text nodes (prices, ratings)
+                await new Promise(r => setTimeout(r, 1500));
+                return "SUCCESS_CARDS_LOADED";
+            }
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return "TIMEOUT_NO_CARDS";
     } else {
-        console.warn("⚠️ Button not detected. Product might be single-seller.");
+        return "NO_BUTTON_FOUND";
     }
 })();
 """
