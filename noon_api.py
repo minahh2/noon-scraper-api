@@ -49,8 +49,7 @@ browser_config = BrowserConfig(
 JS_CLICK_SCRIPT = """
 (async function() {
     function setDebug(msg) {
-        let brandEl = document.querySelector('[data-qa="brand-name"], [class*="brandName"]');
-        if (brandEl) brandEl.textContent = "DEBUG: " + msg;
+        document.body.innerHTML = '<h1>DEBUG_NOON_API: ' + msg + '</h1>';
     }
 
     let mainLoaded = false;
@@ -95,23 +94,39 @@ JS_CLICK_SCRIPT = """
 
     if (btn) {
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await new Promise(r => setTimeout(r, 1500)); // wait for react hydration
+        await new Promise(r => setTimeout(r, 1500)); 
         
         if (btn.hasAttribute('href')) btn.removeAttribute('href');
         
-        // Try clicking multiple times (fixes React delayed hydration)
         for(let j = 0; j < 3; j++) {
             btn.click();
             await new Promise(r => setTimeout(r, 1000));
             
             const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
             if (cards.length > 0) {
-                await new Promise(r => setTimeout(r, 1500));
+                // Manually extract cards to bypass BeautifulSoup/Schema limitations
+                let extractedOffers = [];
+                cards.forEach(card => {
+                    let nameEl = card.querySelector('[class*="_sellerName_"]');
+                    let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
+                    let ratingEl = card.querySelector('[class*="_textValue_"]');
+                    extractedOffers.push({
+                        seller_name: nameEl ? nameEl.innerText.trim() : "",
+                        price: priceEl ? priceEl.innerText.trim() : "",
+                        rating: ratingEl ? ratingEl.innerText.trim() : ""
+                    });
+                });
+                let div = document.createElement("div");
+                div.id = "extracted-offers-json";
+                div.innerText = JSON.stringify(extractedOffers);
+                document.body.appendChild(div);
+                
+                await new Promise(r => setTimeout(r, 1000));
                 return "SUCCESS_CARDS_LOADED";
             }
         }
         
-        setDebug("TIMEOUT_NO_CARDS");
+        setDebug("TIMEOUT_NO_CARDS_AFTER_3_CLICKS");
         return "TIMEOUT_NO_CARDS_AFTER_CLICK";
     } else {
         setDebug("NO_BUTTON_FOUND");
@@ -133,16 +148,13 @@ def scrape():
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
-    # --- NEW, BULLETPROOF CSS SELECTORS ---
-    # We now target data-qa attributes because they don't change when Noon updates their CSS
     buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
-        delay_before_return_html=2.5, # Give react time to paint the offers
+        delay_before_return_html=2.5, 
         excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
@@ -155,6 +167,7 @@ def scrape():
     )
 
     async def run_scraper():
+        from bs4 import BeautifulSoup
         async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
             results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
             
@@ -163,21 +176,28 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                    except Exception:
-                        extracted = {"error": "Failed to parse extracted content"}
+                        # Inject our natively extracted JS data to bypass strategy bugs
+                        soup = BeautifulSoup(result.html, 'html.parser')
+                        offers_div = soup.find(id="extracted-offers-json")
+                        if offers_div and offers_div.string:
+                            native_offers = json.loads(offers_div.string)
+                            if isinstance(extracted, list) and len(extracted) > 0:
+                                extracted[0]["other_offers"] = native_offers
+                            elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
+                                extracted["data"][0]["other_offers"] = native_offers
+                    except Exception as e:
+                        extracted = {"error": "Failed to parse content: " + str(e)}
                     
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted,
-                        "html_preview": result.html[:300] if result.html else "NO HTML"
+                        "data": extracted
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message,
-                        "html_preview": result.html[:300] if result.html else "NO HTML"
+                        "error": result.error_message
                     })
             return output
 
