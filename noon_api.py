@@ -105,7 +105,7 @@ return new Promise((resolve) => {
                 
                 if (btn.hasAttribute('href')) btn.removeAttribute('href');
                 
-                for(let j = 0; j < 4; j++) {
+                for(let j = 0; j < 10; j++) {
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     btn.click();
@@ -131,7 +131,7 @@ return new Promise((resolve) => {
                     }
                 }
                 
-                return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK");
+                return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK: " + btn.outerHTML.substring(0, 300));
             } else {
                 return resolve("NO_BUTTON_FOUND");
             }
@@ -163,7 +163,8 @@ def scrape():
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
         delay_before_return_html=2.5, 
-        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
+        excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
+        remove_overlay_elements=True,
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
@@ -200,6 +201,39 @@ def scrape():
                                 native_offers = [{"debug_error": "js_result_did_not_contain_json: " + js_str[:200]}]
                         else:
                             native_offers = [{"debug_error": "js_execution_result_is_none"}]
+                            
+                        # FALLBACK: Extract from __NEXT_DATA__ if JS click failed
+                        if len(native_offers) > 0 and "debug_error" in native_offers[0]:
+                            try:
+                                soup = BeautifulSoup(result.html, 'html.parser')
+                                next_data = soup.find('script', id='__NEXT_DATA__')
+                                if next_data and next_data.string:
+                                    next_json = json.loads(next_data.string)
+                                    # Noon's __NEXT_DATA__ usually contains product info deep inside props.pageProps.catalog.product
+                                    # We can try to traverse it to find sellers
+                                    # Since structure varies, we'll serialize the seller names if we find them
+                                    sellers = []
+                                    try:
+                                        product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
+                                        if not product:
+                                            # Alternative path
+                                            product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
+                                            
+                                        offers = product.get('offers', [])
+                                        for offer in offers:
+                                            sellers.append({
+                                                "seller_name": offer.get('storeName', offer.get('sellerName', '')),
+                                                "price": str(offer.get('price', '')),
+                                                "rating": str(offer.get('sellerRating', ''))
+                                            })
+                                        if len(sellers) > 0:
+                                            native_offers = sellers
+                                        else:
+                                            native_offers[0]["next_data_status"] = "Found NEXT_DATA but no offers array"
+                                    except Exception as inner_e:
+                                        native_offers[0]["next_data_status"] = "Error traversing NEXT_DATA: " + str(inner_e)
+                            except Exception as e:
+                                pass
                             
                         if isinstance(extracted, list) and len(extracted) > 0:
                             extracted[0]["other_offers"] = native_offers
