@@ -158,9 +158,21 @@ def scrape():
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
     buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
 
+    JS_EXTRACT_SCRIPT = """
+    return new Promise((resolve) => {
+        let el = document.getElementById('__NEXT_DATA__');
+        if (el) {
+            resolve("|||NEXT_DATA|||" + el.textContent + "|||END|||");
+        } else {
+            resolve("|||NEXT_DATA|||NOT_FOUND|||END|||");
+        }
+    });
+    """
+
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
+        js_code=[JS_EXTRACT_SCRIPT],
         delay_before_return_html=2.5, 
         excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
         remove_overlay_elements=True,
@@ -185,49 +197,42 @@ def scrape():
                     try:
                         extracted = json.loads(result.extracted_content)
                         # Extract entirely from __NEXT_DATA__ bypassing all UI interactions
-                        native_offers = [{"debug_error": "next_data_not_found"}]
-                        
-                        try:
-                            from bs4 import BeautifulSoup
-                            
-                            html_to_parse = getattr(result, "raw_html", getattr(result, "html", ""))
-                            if "__NEXT_DATA__" not in html_to_parse:
-                                soup = BeautifulSoup(html_to_parse, 'html.parser')
-                                scripts = soup.find_all('script')
-                                largest_script = ""
-                                for s in scripts:
-                                    if s.string and len(s.string) > len(largest_script):
-                                        largest_script = s.string
-                                preview = largest_script[:300].strip() if largest_script else "No inline scripts found"
-                                native_offers = [{"debug_error": f"Not NextJS. Largest script preview: {preview}"}]
-                            else:
-                                soup = BeautifulSoup(html_to_parse, 'html.parser')
-                                next_data = soup.find('script', id='__NEXT_DATA__')
-                                if next_data and next_data.string:
-                                    next_json = json.loads(next_data.string)
-                                    sellers = []
-                                    try:
-                                        product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
-                                        if not product:
-                                            product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
-                                            
-                                        offers = product.get('offers', [])
-                                        for offer in offers:
-                                            sellers.append({
-                                                "seller_name": str(offer.get('storeName', offer.get('sellerName', ''))),
-                                                "price": str(offer.get('price', '')),
-                                                "rating": str(offer.get('sellerRating', ''))
-                                            })
-                                        if len(sellers) > 0:
-                                            native_offers = sellers
-                                        else:
-                                            native_offers = [{"debug_error": "Found NEXT_DATA but no offers array"}]
-                                    except Exception as inner_e:
-                                        native_offers = [{"debug_error": "Error traversing NEXT_DATA: " + str(inner_e)}]
+                        native_offers = [{"debug_error": "js_result_not_found"}]
+                        js_res = getattr(result, "js_execution_result", None)
+                        if js_res:
+                            js_str = str(js_res)
+                            if "|||NEXT_DATA|||" in js_str:
+                                data_text = js_str.split("|||NEXT_DATA|||")[1].split("|||END|||")[0]
+                                if data_text == "NOT_FOUND":
+                                    native_offers = [{"debug_error": "No __NEXT_DATA__ element found by Javascript"}]
                                 else:
-                                    native_offers = [{"debug_error": "NEXT_DATA script tag exists but BeautifulSoup couldn't parse it"}]
-                        except Exception as e:
-                            native_offers = [{"debug_error": "Python exception: " + str(e)}]
+                                    try:
+                                        next_json = json.loads(data_text)
+                                        sellers = []
+                                        try:
+                                            product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
+                                            if not product:
+                                                product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
+                                                
+                                            offers = product.get('offers', [])
+                                            for offer in offers:
+                                                sellers.append({
+                                                    "seller_name": str(offer.get('storeName', offer.get('sellerName', ''))),
+                                                    "price": str(offer.get('price', '')),
+                                                    "rating": str(offer.get('sellerRating', ''))
+                                                })
+                                            if len(sellers) > 0:
+                                                native_offers = sellers
+                                            else:
+                                                native_offers = [{"debug_error": "Found NEXT_DATA but no offers array"}]
+                                        except Exception as inner_e:
+                                            native_offers = [{"debug_error": "Error traversing NEXT_DATA: " + str(inner_e)}]
+                                    except Exception as e:
+                                        native_offers = [{"debug_error": "json_parse_failed on NEXT_DATA: " + str(e)}]
+                            else:
+                                native_offers = [{"debug_error": "js_result_did_not_contain_NEXT_DATA: " + js_str[:200]}]
+                        else:
+                            native_offers = [{"debug_error": "js_execution_result_is_none"}]
                             
                         if isinstance(extracted, list) and len(extracted) > 0:
                             extracted[0]["other_offers"] = native_offers
