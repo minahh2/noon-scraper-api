@@ -48,43 +48,36 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 (async function() {
-    // 1. Scroll down to trigger lazy loading of the button
-    window.scrollBy(0, 600);
-    await new Promise(r => setTimeout(r, 500));
-    window.scrollBy(0, 600);
-    await new Promise(r => setTimeout(r, 500));
-    
-    // 2. Scan for button (Bilingual: English & Exact Arabic)
-    let btn = null;
-    const allElements = document.querySelectorAll('*');
-    for (let i = 0; i < allElements.length; i++) {
-        let el = allElements[i];
-        if (el.innerText && el.children.length === 0) {
-            let text = el.innerText.trim().toLowerCase();
-            if (text.includes("offers from") || 
-                text.includes("other sellers") || 
-                text.includes("عروض أكثر من بائعين آخرين") || 
-                text.includes("عروض أخرى")) {
-                btn = el;
-                break;
-            }
+    // 0. Wait for the primary Add to Cart / Price component to render
+    let mainLoaded = false;
+    for (let i = 0; i < 40; i++) { // Wait up to 20 seconds
+        if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
+            mainLoaded = true;
+            break;
         }
+        await new Promise(r => setTimeout(r, 500));
     }
 
-    if (!btn) {
-        btn = document.querySelector('[class*="slidingOptionsTrigger"]');
+    if (!mainLoaded) {
+        return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
     }
+
+    // 1. Scroll slightly to trigger lazy loading
+    window.scrollBy(0, 800);
+    await new Promise(r => setTimeout(r, 600));
+    window.scrollBy(0, 800);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // 2. Select the button using structural CSS classes
+    // This perfectly bypasses the Arabic/English translation issue because it targets the React component's class
+    let btn = document.querySelector('[class*="_offerCtr_"], [class*="OffersFromOtherSellers"]');
 
     if (btn) {
         // 3. Scroll to button and click
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await new Promise(r => setTimeout(r, 500)); // wait for smooth scroll
+        await new Promise(r => setTimeout(r, 600)); 
         
-        const target = btn.parentElement || btn;
-        target.click();
-        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-        if (typeof target.onclick === 'function') target.onclick();
+        btn.click();
         
         // 4. Wait for the cards to dynamically inject into the DOM
         for (let i = 0; i < 20; i++) {
@@ -119,7 +112,7 @@ def scrape():
     #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
     # --- NEW, BULLETPROOF CSS SELECTORS ---
     # We now target data-qa attributes because they don't change when Noon updates their CSS
-    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
+    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
