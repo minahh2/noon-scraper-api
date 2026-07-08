@@ -86,10 +86,15 @@ JS_CLICK_SCRIPT = """
                 text.includes("\\u0623\\u062e\\u0631\\u0649") ||
                 text.includes("\\u0645\\u0632\\u064a\\u062f")
             )) {
-                btn = el.parentElement || el;
+                btn = el.closest('button') || el.parentElement || el;
                 break;
             }
         }
+    }
+
+    function setDebug(msg) {
+        let h1 = document.querySelector("h1") || document.querySelector('[data-qa="product-name"]');
+        if (h1) h1.textContent = "DEBUG_NOON_API: " + msg;
     }
 
     if (btn) {
@@ -99,7 +104,7 @@ JS_CLICK_SCRIPT = """
             
             if (btn.hasAttribute('href')) btn.removeAttribute('href');
             
-            for(let j = 0; j < 3; j++) {
+            for(let j = 0; j < 4; j++) {
                 btn.click();
                 await new Promise(r => setTimeout(r, 1000));
                 
@@ -127,7 +132,7 @@ JS_CLICK_SCRIPT = """
                 }
             }
             
-            setDebug("TIMEOUT_NO_CARDS_AFTER_3_CLICKS");
+            setDebug("TIMEOUT_NO_CARDS_AFTER_CLICKS");
             return "TIMEOUT_NO_CARDS_AFTER_CLICK";
         } catch (err) {
             setDebug("JS_CRASH: " + err.toString());
