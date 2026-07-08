@@ -128,10 +128,13 @@ JS_CLICK_SCRIPT = """
                         });
                     });
                     
-                    let meta = document.createElement("meta");
-                    meta.name = "extracted-offers-json";
-                    meta.content = JSON.stringify(extractedOffers);
-                    document.head.appendChild(meta);
+                    let titleEl = document.querySelector('[class*="productTitle"], [class*="ProductTitle"]');
+                    if (titleEl) {
+                        titleEl.setAttribute("data-extracted-offers", JSON.stringify(extractedOffers));
+                    } else {
+                        // Fallback
+                        document.body.setAttribute("data-extracted-offers", JSON.stringify(extractedOffers));
+                    }
                     
                     await new Promise(r => setTimeout(r, 1000));
                     return "SUCCESS_CARDS_LOADED";
@@ -194,11 +197,11 @@ def scrape():
                         extracted = json.loads(result.extracted_content)
                         # Inject our natively extracted JS data to bypass strategy bugs
                         soup = BeautifulSoup(result.html, 'html.parser')
-                        meta_tag = soup.find("meta", {"name": "extracted-offers-json"})
-                        native_offers = [{"debug_error": "meta_tag_not_found_in_python"}]
+                        title_el = soup.find(lambda tag: tag.has_attr('data-extracted-offers'))
+                        native_offers = [{"debug_error": "data_attr_not_found_in_python"}]
                         
-                        if meta_tag and meta_tag.get("content"):
-                            json_text = meta_tag["content"]
+                        if title_el and title_el.get("data-extracted-offers"):
+                            json_text = title_el["data-extracted-offers"]
                             if json_text:
                                 try:
                                     native_offers = json.loads(json_text)
