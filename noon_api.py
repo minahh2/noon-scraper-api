@@ -72,37 +72,43 @@ JS_CLICK_SCRIPT = """
     await new Promise(r => setTimeout(r, 600));
     
     let btn = null;
-    const allElements = document.querySelectorAll('*');
-    for (let i = 0; i < allElements.length; i++) {
-        let el = allElements[i];
-        if (el.children.length === 0) {
-            let rawText = el.textContent || el.innerText || "";
-            let text = rawText.trim().toLowerCase();
-            if (text.length > 0 && (
-                text.includes("offers from") || 
-                text.includes("other sellers") || 
-                text.includes("\\u0639\\u0631\\u0648\\u0636") || 
-                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
-                text.includes("\\u0623\\u062e\\u0631\\u0649") ||
-                text.includes("\\u0645\\u0632\\u064a\\u062f")
-            )) {
-                btn = el.closest('button') || el.parentElement || el;
-                break;
+    let attempts = 0;
+    
+    // Poll for the React DOM to render
+    while (attempts < 10) {
+        const allElements = document.querySelectorAll('*');
+        for (let i = 0; i < allElements.length; i++) {
+            let el = allElements[i];
+            if (el.children.length === 0) {
+                let rawText = el.textContent || el.innerText || "";
+                let text = rawText.trim().toLowerCase();
+                if (text.length > 0 && (
+                    text.includes("offers from") || 
+                    text.includes("other sellers") || 
+                    text.includes("\\u0639\\u0631\\u0648\\u0636") || 
+                    text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
+                    text.includes("\\u0623\\u062e\\u0631\\u0649") ||
+                    text.includes("\\u0645\\u0632\\u064a\\u062f")
+                )) {
+                    btn = el.closest('button') || el.parentElement || el;
+                    break;
+                }
             }
         }
+        
+        if (btn) break;
+        await new Promise(r => setTimeout(r, 1000));
+        attempts++;
     }
 
     function setDebug(msg) {
-        let brandEl = document.querySelector('[class*="_brand_"], [class*="brandStoreLink"]');
-        let titleEl = document.querySelector('[class*="productTitle"], [class*="ProductTitle"]');
-        if (brandEl) brandEl.textContent = "DEBUG_NOON_API: " + msg;
-        if (titleEl) titleEl.textContent = "DEBUG_NOON_API: " + msg;
+        document.documentElement.setAttribute("data-debug-error", msg);
     }
 
     if (btn) {
         try {
             btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            await new Promise(r => setTimeout(r, 3000)); 
+            await new Promise(r => setTimeout(r, 2000)); 
             
             if (btn.hasAttribute('href')) btn.removeAttribute('href');
             
@@ -128,17 +134,7 @@ JS_CLICK_SCRIPT = """
                         });
                     });
                     
-                    let titleEl = document.querySelector('[class*="productTitle"], [class*="ProductTitle"]');
-                    if (titleEl) {
-                        titleEl.textContent = titleEl.textContent + "|||JSON|||" + JSON.stringify(extractedOffers);
-                    } else {
-                        // Fallback
-                        let h1 = document.querySelector("h1") || document.body;
-                        if(h1 && h1.textContent) {
-                            h1.textContent = h1.textContent + "|||JSON|||" + JSON.stringify(extractedOffers);
-                        }
-                    }
-                    
+                    document.documentElement.setAttribute("data-extracted-offers", JSON.stringify(extractedOffers));
                     await new Promise(r => setTimeout(r, 1000));
                     return "SUCCESS_CARDS_LOADED";
                 }
@@ -199,28 +195,25 @@ def scrape():
                     try:
                         extracted = json.loads(result.extracted_content)
                         # Inject our natively extracted JS data to bypass strategy bugs
-                        native_offers = [{"debug_error": "json_not_appended_to_text"}]
+                        soup = BeautifulSoup(result.html, 'html.parser')
+                        html_tag = soup.find('html')
+                        native_offers = [{"debug_error": "html_tag_not_found"}]
+                        
+                        if html_tag:
+                            if html_tag.has_attr("data-debug-error"):
+                                native_offers = [{"debug_error": html_tag["data-debug-error"]}]
+                            elif html_tag.has_attr("data-extracted-offers"):
+                                json_text = html_tag["data-extracted-offers"]
+                                try:
+                                    native_offers = json.loads(json_text)
+                                except Exception as e:
+                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
+                            else:
+                                native_offers = [{"debug_error": "data_attr_not_found_on_html_tag"}]
                         
                         if isinstance(extracted, list) and len(extracted) > 0:
-                            product_name = extracted[0].get("product_name", "")
-                            if "|||JSON|||" in product_name:
-                                parts = product_name.split("|||JSON|||")
-                                extracted[0]["product_name"] = parts[0].strip()
-                                try:
-                                    native_offers = json.loads(parts[1])
-                                except Exception as e:
-                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
                             extracted[0]["other_offers"] = native_offers
-                            
                         elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
-                            product_name = extracted["data"][0].get("product_name", "")
-                            if "|||JSON|||" in product_name:
-                                parts = product_name.split("|||JSON|||")
-                                extracted["data"][0]["product_name"] = parts[0].strip()
-                                try:
-                                    native_offers = json.loads(parts[1])
-                                except Exception as e:
-                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
                             extracted["data"][0]["other_offers"] = native_offers
                         else:
                             extracted = {"original": extracted, "other_offers": native_offers}
