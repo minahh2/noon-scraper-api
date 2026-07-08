@@ -48,9 +48,13 @@ browser_config = BrowserConfig(
 
 JS_CLICK_SCRIPT = """
 (async function() {
-    // 0. Wait for the primary Add to Cart / Price component to render
+    function setDebug(msg) {
+        const els = document.querySelectorAll('[class*="_linkList_"] [class*="_innerLinkText_"], [class*="SupportDetails"]');
+        if (els.length > 0) els[0].innerText = "DEBUG: " + msg;
+    }
+
     let mainLoaded = false;
-    for (let i = 0; i < 40; i++) { // Wait up to 20 seconds
+    for (let i = 0; i < 40; i++) { 
         if (document.querySelector('[data-qa="pdp-add-to-cart-revamp"]')) {
             mainLoaded = true;
             break;
@@ -59,39 +63,35 @@ JS_CLICK_SCRIPT = """
     }
 
     if (!mainLoaded) {
-        return "TIMEOUT_MAIN_PAGE_NOT_LOADED";
+        setDebug("TIMEOUT_MAIN_PAGE_NOT_LOADED");
+        return;
     }
 
-    // 1. Scroll slightly to trigger lazy loading
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     window.scrollBy(0, 800);
     await new Promise(r => setTimeout(r, 600));
     
-    // 2. Select the button using structural CSS classes
-    // This perfectly bypasses the Arabic/English translation issue because it targets the React component's class
     let btn = document.querySelector('[class*="_offerCtr_"], [class*="OffersFromOtherSellers"]');
 
     if (btn) {
-        // 3. Scroll to button and click
         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await new Promise(r => setTimeout(r, 600)); 
         
         btn.click();
         
-        // 4. Wait for the cards to dynamically inject into the DOM
         for (let i = 0; i < 20; i++) {
             const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
             if (cards.length > 0) {
-                // Buffer to let React paint the text nodes (prices, ratings)
                 await new Promise(r => setTimeout(r, 1500));
-                return "SUCCESS_CARDS_LOADED";
+                setDebug("SUCCESS_CARDS_LOADED_COUNT_" + cards.length);
+                return;
             }
             await new Promise(r => setTimeout(r, 200));
         }
-        return "TIMEOUT_NO_CARDS";
+        setDebug("TIMEOUT_NO_CARDS_AFTER_CLICK");
     } else {
-        return "NO_BUTTON_FOUND";
+        setDebug("NO_BUTTON_FOUND_WITH_CLASS");
     }
 })();
 """
