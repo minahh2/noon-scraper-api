@@ -179,12 +179,14 @@ def scrape():
                         # Inject our natively extracted JS data to bypass strategy bugs
                         soup = BeautifulSoup(result.html, 'html.parser')
                         offers_div = soup.find(id="extracted-offers-json")
-                        if offers_div and offers_div.string:
-                            native_offers = json.loads(offers_div.string)
-                            if isinstance(extracted, list) and len(extracted) > 0:
-                                extracted[0]["other_offers"] = native_offers
-                            elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
-                                extracted["data"][0]["other_offers"] = native_offers
+                        if offers_div:
+                            json_text = offers_div.get_text(strip=True)
+                            if json_text:
+                                native_offers = json.loads(json_text)
+                                if isinstance(extracted, list) and len(extracted) > 0:
+                                    extracted[0]["other_offers"] = native_offers
+                                elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
+                                    extracted["data"][0]["other_offers"] = native_offers
                     except Exception as e:
                         extracted = {"error": "Failed to parse content: " + str(e)}
                     
