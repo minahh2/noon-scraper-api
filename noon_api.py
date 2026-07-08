@@ -93,19 +93,25 @@ JS_CLICK_SCRIPT = """
     }
 
     function setDebug(msg) {
-        let h1 = document.querySelector("h1") || document.querySelector('[data-qa="product-name"]');
-        if (h1) h1.textContent = "DEBUG_NOON_API: " + msg;
+        let brandEl = document.querySelector('[class*="_brand_"], [class*="brandStoreLink"]');
+        let titleEl = document.querySelector('[class*="productTitle"], [class*="ProductTitle"]');
+        if (brandEl) brandEl.textContent = "DEBUG_NOON_API: " + msg;
+        if (titleEl) titleEl.textContent = "DEBUG_NOON_API: " + msg;
     }
 
     if (btn) {
         try {
             btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            await new Promise(r => setTimeout(r, 1500)); 
+            await new Promise(r => setTimeout(r, 3000)); 
             
             if (btn.hasAttribute('href')) btn.removeAttribute('href');
             
             for(let j = 0; j < 4; j++) {
+                // Dispatch full React synthetic event chain
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                 btn.click();
+                
                 await new Promise(r => setTimeout(r, 1000));
                 
                 const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
