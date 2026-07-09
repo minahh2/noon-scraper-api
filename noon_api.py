@@ -182,21 +182,21 @@ def scrape():
                 let attempts = 0;
                 
                 while (attempts < 10) {
-                    const allElements = document.querySelectorAll('button, div, span, p');
+                    const allElements = document.querySelectorAll('button, div, span, p, a');
                     for (let i = 0; i < allElements.length; i++) {
                         let el = allElements[i];
                         if (el.children.length === 0) {
                             let rawText = el.textContent || el.innerText || "";
                             let text = rawText.trim().toLowerCase();
                             if (text.length > 0 && (
-                                text === "offers from" ||
+                                text.includes("offers from") || 
                                 text.includes("other sellers") || 
-                                text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0645\\u0646") || 
-                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
+                                text.includes("\\u0639\\u0631\\u0648\\u0636") || 
+                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
                                 text.includes("offers") && text.includes("other") ||
                                 text.includes("new from")
                             )) {
-                                btn = el.closest('button') || el.closest('a') || el;
+                                btn = el.closest('button') || el.closest('a') || el.parentElement || el;
                                 break;
                             }
                         }
@@ -212,62 +212,44 @@ def scrape():
                     
                     if (btn.hasAttribute('href')) btn.removeAttribute('href');
                     
-                    // Fire native events just in case
+                    let initialChildren = document.body.children.length;
+                    
+                    // Fire native events
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     btn.click();
                     
-                    // The ultimate bypass: Call React's internal onClick handler directly!
+                    // React fiber bypass
                     let reactKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
                     if (reactKey && btn[reactKey] && btn[reactKey].onClick) {
-                        try {
-                            btn[reactKey].onClick({
-                                preventDefault: () => {},
-                                stopPropagation: () => {},
-                                target: btn,
-                                currentTarget: btn
-                            });
-                        } catch (e) {}
+                        try { btn[reactKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: btn, currentTarget: btn }); } catch (e) {}
                     }
                     
-                    // If the listener is on a parent element, traverse up and call it
                     let parent = btn.parentElement;
                     while (parent && parent !== document.body) {
                         let pKey = Object.keys(parent).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
                         if (pKey && parent[pKey] && parent[pKey].onClick) {
-                            try {
-                                parent[pKey].onClick({
-                                    preventDefault: () => {},
-                                    stopPropagation: () => {},
-                                    target: parent,
-                                    currentTarget: parent
-                                });
-                            } catch (e) {}
+                            try { parent[pKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: parent, currentTarget: parent }); } catch (e) {}
                             break;
                         }
                         parent = parent.parentElement;
                     }
                     
-                    for(let j = 0; j < 10; j++) {
-                        await new Promise(r => setTimeout(r, 1000));
-                        const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], div[class*="_seller_"]');
-                        if (cards.length > 0) {
-                            let extractedOffers = [];
-                            cards.forEach(card => {
-                                let nameEl = card.querySelector('[class*="_sellerName_"], [class*="sellerName"]');
-                                let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"], [class*="sellingPrice"]');
-                                let ratingEl = card.querySelector('[class*="_textValue_"], [class*="ratingValue"]');
-                                extractedOffers.push({
-                                    seller_name: nameEl ? nameEl.innerText.trim() : "",
-                                    price: priceEl ? priceEl.innerText.trim() : "",
-                                    rating: ratingEl ? ratingEl.innerText.trim() : ""
-                                });
-                            });
-                            return resolve("|||EXTRACTED_OFFERS|||" + JSON.stringify(extractedOffers) + "|||END|||");
-                        }
+                    // Wait for drawer to open
+                    await new Promise(r => setTimeout(r, 3000));
+                    
+                    // Let's dump whatever new dialog or drawer opened!
+                    let newHtml = "NO_NEW_ELEMENTS";
+                    if (document.body.children.length > initialChildren) {
+                        let newEl = document.body.children[document.body.children.length - 1];
+                        newHtml = newEl.outerHTML;
+                    } else {
+                        // Look for a dialog or overlay explicitly
+                        let dialog = document.querySelector('[role="dialog"], [class*="dialog"], [class*="modal"], [class*="drawer"]');
+                        if (dialog) newHtml = dialog.outerHTML;
                     }
                     
-                    return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK");
+                    return resolve("|||DRAWER_HTML|||" + newHtml.substring(0, 5000) + "|||END|||");
                 } else {
                     return resolve("NO_BUTTON_FOUND");
                 }
@@ -301,19 +283,15 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        # Extract natively from JS result bypassing the DOM entirely
                         native_offers = [{"debug_error": "js_result_not_found"}]
                         js_res = getattr(result, "js_execution_result", None)
                         if js_res:
                             js_str = str(js_res)
-                            if "|||EXTRACTED_OFFERS|||" in js_str:
-                                json_text = js_str.split("|||EXTRACTED_OFFERS|||")[1].split("|||END|||")[0]
-                                try:
-                                    native_offers = json.loads(json_text)
-                                except Exception as e:
-                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
+                            if "|||DRAWER_HTML|||" in js_str:
+                                data_text = js_str.split("|||DRAWER_HTML|||")[1].split("|||END|||")[0]
+                                native_offers = [{"debug_error": "DRAWER_HTML: " + data_text}]
                             else:
-                                native_offers = [{"debug_error": "js_result_did_not_contain_json: " + js_str[:200]}]
+                                native_offers = [{"debug_error": "js_result_did_not_contain_DRAWER_HTML: " + js_str[:200]}]
                         else:
                             native_offers = [{"debug_error": "js_execution_result_is_none"}]
                             
