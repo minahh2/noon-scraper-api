@@ -47,101 +47,79 @@ browser_config = BrowserConfig(
 )
 
 JS_CLICK_SCRIPT = """
-return new Promise((resolve) => {
-    (async function() {
+new Promise((resolve) => {
+    (async () => {
         try {
-            let mainLoaded = false;
-            for (let i = 0; i < 40; i++) { 
-                if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"], [class*="productTitle"]')) {
-                    mainLoaded = true;
-                    break;
+            console.log("⏳ Starting execution...");
+            
+            // 1. Scan for button (Bilingual: English & Exact Arabic)
+            let btn = null;
+            for (let i = 0; i < 20; i++) {
+                btn = Array.from(document.querySelectorAll('*')).find(el => {
+                    if (!el.innerText || el.children.length > 0) return false;
+                    let text = el.innerText.trim().toLowerCase();
+                    return text.includes("offers from") || 
+                           text.includes("other sellers") || 
+                           text.includes("عروض أكثر من بائعين آخرين") || 
+                           text.includes("عروض أخرى");
+                });
+                
+                // Fallback to Noon's internal class name if text fails entirely
+                if (!btn) {
+                    btn = document.querySelector('[class*="slidingOptionsTrigger"]');
+                }
+
+                if (btn) break;
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            if (!btn) {
+                console.warn("⚠️ Button not detected. Product might be single-seller.");
+                resolve(true); 
+                return;
+            }
+
+            // 2. Target parent and Execute Click
+            const target = btn.parentElement || btn;
+            console.log("🎯 Targeting element:", target);
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            setTimeout(() => {
+                try {
+                    target.click();
+                    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    if (typeof target.onclick === 'function') target.onclick();
+                } catch(e) {
+                    console.error("Click execution error:", e);
+                }
+            }, 300);
+
+            // 3. Wait for Content (Using the exact CSS from our bulletproof schema)
+            console.log("⏳ Checking for loaded offers...");
+            for (let i = 0; i < 15; i++) {
+                // Looking for the physical offer cards instead of language-specific text
+                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
+                
+                if (cards.length > 0) {
+                    console.log(`🎉 SUCCESS: ${cards.length} offers loaded.`);
+                    // Buffer to let React paint the text inside the cards, then release Python
+                    setTimeout(() => resolve(true), 800); 
+                    return;
                 }
                 await new Promise(r => setTimeout(r, 500));
             }
 
-            if (!mainLoaded) {
-                return resolve("TIMEOUT_MAIN_PAGE_NOT_LOADED");
-            }
+            console.log("🏁 Loop finished without finding offers.");
+            resolve(true); 
 
-            window.scrollBy(0, 800);
-            await new Promise(r => setTimeout(r, 600));
-            window.scrollBy(0, 800);
-            await new Promise(r => setTimeout(r, 600));
-            
-            let btn = null;
-            let attempts = 0;
-            
-            // Poll for the React DOM to render
-            while (attempts < 10) {
-                // Strict text matching on leaf nodes
-                const allElements = document.querySelectorAll('button, div, span, p');
-                for (let i = 0; i < allElements.length; i++) {
-                    let el = allElements[i];
-                    if (el.children.length === 0) {
-                        let rawText = el.textContent || el.innerText || "";
-                        let text = rawText.trim().toLowerCase();
-                        if (text.length > 0 && (
-                            text === "offers from" ||
-                            text.includes("other sellers") || 
-                            text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0645\\u0646") || 
-                            text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
-                            text.includes("offers") && text.includes("other") ||
-                            text.includes("new from")
-                        )) {
-                            btn = el.closest('button') || el;
-                            break;
-                        }
-                    }
-                }
-                
-                if (btn) break;
-                await new Promise(r => setTimeout(r, 1000));
-                attempts++;
-            }
-
-            if (btn) {
-                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                await new Promise(r => setTimeout(r, 2000)); 
-                
-                if (btn.hasAttribute('href')) btn.removeAttribute('href');
-                
-                for(let j = 0; j < 10; j++) {
-                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-                    btn.click();
-                    
-                    await new Promise(r => setTimeout(r, 1000));
-                    
-                    const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
-                    if (cards.length > 0) {
-                        let extractedOffers = [];
-                        cards.forEach(card => {
-                            let nameEl = card.querySelector('[class*="_sellerName_"]');
-                            let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"]');
-                            let ratingEl = card.querySelector('[class*="_textValue_"]');
-                            extractedOffers.push({
-                                seller_name: nameEl ? nameEl.innerText.trim() : "",
-                                price: priceEl ? priceEl.innerText.trim() : "",
-                                rating: ratingEl ? ratingEl.innerText.trim() : ""
-                            });
-                        });
-                        let jsonStr = JSON.stringify(extractedOffers);
-                        await new Promise(r => setTimeout(r, 1000));
-                        return resolve("|||EXTRACTED_OFFERS|||" + jsonStr + "|||END|||");
-                    }
-                }
-                
-                return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK: " + btn.outerHTML.substring(0, 300));
-            } else {
-                return resolve("NO_BUTTON_FOUND");
-            }
-        } catch (err) {
-            return resolve("JS_CRASH: " + err.toString());
+        } catch (error) {
+            console.error("❌ Exception caught:", error);
+            resolve(true); 
         }
     })();
 });
 """
-
 @app.route('/scrape', methods=['POST'])
 def scrape():
     data = request.get_json()
@@ -156,130 +134,31 @@ def scrape():
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
-
-    JS_CLICK_SCRIPT = """
-    return new Promise((resolve) => {
-        (async function() {
-            try {
-                // Block all client-side and server-side navigations
-                history.pushState = function() {};
-                history.replaceState = function() {};
-                window.onbeforeunload = function() { return false; };
-                window.addEventListener('click', e => {
-                    let a = e.target.closest('a');
-                    if (a && a.href && !a.href.includes('?o=')) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                }, true);
-
-                let mainLoaded = false;
-                for (let i = 0; i < 40; i++) { 
-                    if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"]')) {
-                        mainLoaded = true;
-                        break;
-                    }
-                    await new Promise(r => setTimeout(r, 500));
-                }
-
-                if (!mainLoaded) return resolve("TIMEOUT_MAIN_PAGE_NOT_LOADED");
-
-                window.scrollBy(0, 800);
-                await new Promise(r => setTimeout(r, 600));
-                window.scrollBy(0, 800);
-                await new Promise(r => setTimeout(r, 600));
-                
-                let btn = null;
-                let attempts = 0;
-                
-                while (attempts < 10) {
-                    const allElements = document.querySelectorAll('button, div, span, p, a');
-                    for (let i = 0; i < allElements.length; i++) {
-                        let el = allElements[i];
-                        if (el.children.length === 0) {
-                            let text = (el.textContent || el.innerText || "").trim().toLowerCase();
-                            if (text.length > 0 && (
-                                text.includes("other sellers") || 
-                                text.includes("other offers") ||
-                                text.includes("compare offers") ||
-                                text === "view more sellers" ||
-                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
-                                text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0623\\u062e\\u0631\\u0649")
-                            )) {
-                                btn = el.closest('button') || el.closest('a') || el.parentElement || el;
-                                break;
-                            }
-                        }
-                    }
-                    if (btn) break;
-                    await new Promise(r => setTimeout(r, 1000));
-                    attempts++;
-                }
-
-                if (btn) {
-                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    await new Promise(r => setTimeout(r, 1000)); 
-                    
-                    if (btn.hasAttribute('href')) btn.removeAttribute('href');
-                    let initialChildren = document.body.children.length;
-                    
-                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-                    btn.click();
-                    
-                    let reactKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-                    if (reactKey && btn[reactKey] && btn[reactKey].onClick) {
-                        try { btn[reactKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: btn, currentTarget: btn }); } catch (e) {}
-                    }
-                    
-                    let parent = btn.parentElement;
-                    while (parent && parent !== document.body) {
-                        let pKey = Object.keys(parent).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-                        if (pKey && parent[pKey] && parent[pKey].onClick) {
-                            try { parent[pKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: parent, currentTarget: parent }); } catch (e) {}
-                            break;
-                        }
-                        parent = parent.parentElement;
-                    }
-                    
-                    await new Promise(r => setTimeout(r, 3000));
-                    
-                    let newHtml = "NO_NEW_ELEMENTS";
-                    if (document.body.children.length > initialChildren) {
-                        let newEl = document.body.children[document.body.children.length - 1];
-                        newHtml = newEl.outerHTML;
-                    } else {
-                        let dialog = document.querySelector('[role="dialog"], [class*="dialog"], [class*="modal"], [class*="drawer"]');
-                        if (dialog) newHtml = dialog.outerHTML;
-                    }
-                    
-                    return resolve("|||DRAWER_HTML|||" + newHtml.substring(0, 5000) + "|||END|||");
-                } else {
-                    return resolve("NO_BUTTON_FOUND");
-                }
-            } catch (err) {
-                return resolve("JS_CRASH: " + err.toString());
-            }
-        })();
-    });
-    """
+    #buy_box_wait_selector = '[class^="AddToCartWithQuanityV2"][class$="_isVisible"], [class^="AddToCartWithQuanityV2"][class$="_disabledElement"]'
+    # --- NEW, BULLETPROOF CSS SELECTORS ---
+    # We now target data-qa attributes because they don't change when Noon updates their CSS
+    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"], [data-qa="div-price-now"]'
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
+        #js_code_before_wait=[JS_CLICK_SCRIPT],
+        #wait_for='#noon-other-offers-loaded',
+        wait_for=buy_box_wait_selector,
         js_code=[JS_CLICK_SCRIPT],
-        delay_before_return_html=2.5, 
-        excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
-        remove_overlay_elements=True,
+       
+        excluded_tags=['nav', 'footer', 'header', 'script', 'style', 'noscript'],
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
-        word_count_threshold=10
+        screenshot=False, 
+        scan_full_page=False,
+        magic=True,
+        simulate_user=True,
+        page_timeout=180000 
     )
 
     async def run_scraper():
-        from bs4 import BeautifulSoup
         async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
             results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
             
@@ -288,40 +167,19 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        native_offers = [{"debug_error": "js_result_not_found"}]
-                        js_res = getattr(result, "js_execution_result", None)
-                        if js_res:
-                            js_str = str(js_res)
-                            if "|||DRAWER_HTML|||" in js_str:
-                                data_text = js_str.split("|||DRAWER_HTML|||")[1].split("|||END|||")[0]
-                                native_offers = [{"debug_error": "DRAWER_HTML: " + data_text}]
-                            else:
-                                native_offers = [{"debug_error": "js_result_did_not_contain_DRAWER_HTML: " + js_str[:200]}]
-                        else:
-                            native_offers = [{"debug_error": "js_execution_result_is_none"}]
-                            
-                        if isinstance(extracted, list) and len(extracted) > 0:
-                            extracted[0]["other_offers"] = native_offers
-                        elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
-                            extracted["data"][0]["other_offers"] = native_offers
-                        else:
-                            extracted = {"original": extracted, "other_offers": native_offers}
-                            
-                    except Exception as e:
-                        extracted = {"error": "Failed to parse content: " + str(e)}
+                    except Exception:
+                        extracted = {"error": "Failed to parse extracted content"}
                     
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted,
-                        "html_preview": result.html[:500] if result.html else "NO HTML"
+                        "data": extracted
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message,
-                        "html_preview": result.html[:500] if result.html else "NO HTML"
+                        "error": result.error_message
                     })
             return output
 
