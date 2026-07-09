@@ -164,7 +164,19 @@ def scrape():
         if (el) {
             resolve("|||NEXT_DATA|||" + el.textContent + "|||END|||");
         } else {
-            resolve("|||NEXT_DATA|||NOT_FOUND|||END|||");
+            let scripts = document.querySelectorAll('script');
+            let largest = "";
+            for (let i = 0; i < scripts.length; i++) {
+                let text = scripts[i].textContent || "";
+                if (text.length > largest.length && text.includes('{')) {
+                    largest = text;
+                }
+            }
+            if (largest.length > 0) {
+                resolve("|||NEXT_DATA|||LARGEST_SCRIPT_PREVIEW: " + largest.substring(0, 1000) + "|||END|||");
+            } else {
+                resolve("|||NEXT_DATA|||NOT_FOUND|||END|||");
+            }
         }
     });
     """
@@ -205,6 +217,8 @@ def scrape():
                                 data_text = js_str.split("|||NEXT_DATA|||")[1].split("|||END|||")[0]
                                 if data_text == "NOT_FOUND":
                                     native_offers = [{"debug_error": "No __NEXT_DATA__ element found by Javascript"}]
+                                elif data_text.startswith("LARGEST_SCRIPT_PREVIEW:"):
+                                    native_offers = [{"debug_error": data_text}]
                                 else:
                                     try:
                                         next_json = json.loads(data_text)
