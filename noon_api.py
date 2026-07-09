@@ -158,44 +158,137 @@ def scrape():
     extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
     buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
 
-    JS_EXTRACT_SCRIPT = """
+    JS_CLICK_SCRIPT = """
     return new Promise((resolve) => {
-        let el = document.getElementById('__NEXT_DATA__');
-        if (el) {
-            resolve("|||NEXT_DATA|||" + el.textContent + "|||END|||");
-        } else {
-            let scripts = document.querySelectorAll('script');
-            let largest = "";
-            for (let i = 0; i < scripts.length; i++) {
-                let text = scripts[i].textContent || "";
-                if (text.length > largest.length && text.includes('{')) {
-                    largest = text;
+        (async function() {
+            try {
+                let mainLoaded = false;
+                for (let i = 0; i < 40; i++) { 
+                    if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"], [class*="productTitle"]')) {
+                        mainLoaded = true;
+                        break;
+                    }
+                    await new Promise(r => setTimeout(r, 500));
                 }
+
+                if (!mainLoaded) return resolve("TIMEOUT_MAIN_PAGE_NOT_LOADED");
+
+                window.scrollBy(0, 800);
+                await new Promise(r => setTimeout(r, 600));
+                window.scrollBy(0, 800);
+                await new Promise(r => setTimeout(r, 600));
+                
+                let btn = null;
+                let attempts = 0;
+                
+                while (attempts < 10) {
+                    const allElements = document.querySelectorAll('button, div, span, p');
+                    for (let i = 0; i < allElements.length; i++) {
+                        let el = allElements[i];
+                        if (el.children.length === 0) {
+                            let rawText = el.textContent || el.innerText || "";
+                            let text = rawText.trim().toLowerCase();
+                            if (text.length > 0 && (
+                                text === "offers from" ||
+                                text.includes("other sellers") || 
+                                text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0645\\u0646") || 
+                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
+                                text.includes("offers") && text.includes("other") ||
+                                text.includes("new from")
+                            )) {
+                                btn = el.closest('button') || el.closest('a') || el;
+                                break;
+                            }
+                        }
+                    }
+                    if (btn) break;
+                    await new Promise(r => setTimeout(r, 1000));
+                    attempts++;
+                }
+
+                if (btn) {
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await new Promise(r => setTimeout(r, 1000)); 
+                    
+                    if (btn.hasAttribute('href')) btn.removeAttribute('href');
+                    
+                    // Fire native events just in case
+                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    btn.click();
+                    
+                    // The ultimate bypass: Call React's internal onClick handler directly!
+                    let reactKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
+                    if (reactKey && btn[reactKey] && btn[reactKey].onClick) {
+                        try {
+                            btn[reactKey].onClick({
+                                preventDefault: () => {},
+                                stopPropagation: () => {},
+                                target: btn,
+                                currentTarget: btn
+                            });
+                        } catch (e) {}
+                    }
+                    
+                    // If the listener is on a parent element, traverse up and call it
+                    let parent = btn.parentElement;
+                    while (parent && parent !== document.body) {
+                        let pKey = Object.keys(parent).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
+                        if (pKey && parent[pKey] && parent[pKey].onClick) {
+                            try {
+                                parent[pKey].onClick({
+                                    preventDefault: () => {},
+                                    stopPropagation: () => {},
+                                    target: parent,
+                                    currentTarget: parent
+                                });
+                            } catch (e) {}
+                            break;
+                        }
+                        parent = parent.parentElement;
+                    }
+                    
+                    for(let j = 0; j < 10; j++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="], div[class*="_seller_"]');
+                        if (cards.length > 0) {
+                            let extractedOffers = [];
+                            cards.forEach(card => {
+                                let nameEl = card.querySelector('[class*="_sellerName_"], [class*="sellerName"]');
+                                let priceEl = card.querySelector('[class*="_sellingPrice_"] strong, [class*="_sellingPrice_"], [class*="sellingPrice"]');
+                                let ratingEl = card.querySelector('[class*="_textValue_"], [class*="ratingValue"]');
+                                extractedOffers.push({
+                                    seller_name: nameEl ? nameEl.innerText.trim() : "",
+                                    price: priceEl ? priceEl.innerText.trim() : "",
+                                    rating: ratingEl ? ratingEl.innerText.trim() : ""
+                                });
+                            });
+                            return resolve("|||EXTRACTED_OFFERS|||" + JSON.stringify(extractedOffers) + "|||END|||");
+                        }
+                    }
+                    
+                    return resolve("TIMEOUT_NO_CARDS_AFTER_CLICK");
+                } else {
+                    return resolve("NO_BUTTON_FOUND");
+                }
+            } catch (err) {
+                return resolve("JS_CRASH: " + err.toString());
             }
-            if (largest.length > 0) {
-                resolve("|||NEXT_DATA|||LARGEST_SCRIPT_PREVIEW: " + largest.substring(0, 1000) + "|||END|||");
-            } else {
-                resolve("|||NEXT_DATA|||NOT_FOUND|||END|||");
-            }
-        }
+        })();
     });
     """
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        js_code=[JS_EXTRACT_SCRIPT],
+        js_code=[JS_CLICK_SCRIPT],
         delay_before_return_html=2.5, 
         excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
         remove_overlay_elements=True,
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
-        screenshot=False, 
-        scan_full_page=False,
-        magic=True,
-        simulate_user=True,
-        page_timeout=180000 
+        word_count_threshold=10
     )
 
     async def run_scraper():
@@ -208,43 +301,19 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        # Extract entirely from __NEXT_DATA__ bypassing all UI interactions
+                        # Extract natively from JS result bypassing the DOM entirely
                         native_offers = [{"debug_error": "js_result_not_found"}]
                         js_res = getattr(result, "js_execution_result", None)
                         if js_res:
                             js_str = str(js_res)
-                            if "|||NEXT_DATA|||" in js_str:
-                                data_text = js_str.split("|||NEXT_DATA|||")[1].split("|||END|||")[0]
-                                if data_text == "NOT_FOUND":
-                                    native_offers = [{"debug_error": "No __NEXT_DATA__ element found by Javascript"}]
-                                elif data_text.startswith("LARGEST_SCRIPT_PREVIEW:"):
-                                    native_offers = [{"debug_error": data_text}]
-                                else:
-                                    try:
-                                        next_json = json.loads(data_text)
-                                        sellers = []
-                                        try:
-                                            product = next_json.get('props', {}).get('pageProps', {}).get('catalog', {}).get('product', {})
-                                            if not product:
-                                                product = next_json.get('props', {}).get('pageProps', {}).get('product', {})
-                                                
-                                            offers = product.get('offers', [])
-                                            for offer in offers:
-                                                sellers.append({
-                                                    "seller_name": str(offer.get('storeName', offer.get('sellerName', ''))),
-                                                    "price": str(offer.get('price', '')),
-                                                    "rating": str(offer.get('sellerRating', ''))
-                                                })
-                                            if len(sellers) > 0:
-                                                native_offers = sellers
-                                            else:
-                                                native_offers = [{"debug_error": "Found NEXT_DATA but no offers array"}]
-                                        except Exception as inner_e:
-                                            native_offers = [{"debug_error": "Error traversing NEXT_DATA: " + str(inner_e)}]
-                                    except Exception as e:
-                                        native_offers = [{"debug_error": "json_parse_failed on NEXT_DATA: " + str(e)}]
+                            if "|||EXTRACTED_OFFERS|||" in js_str:
+                                json_text = js_str.split("|||EXTRACTED_OFFERS|||")[1].split("|||END|||")[0]
+                                try:
+                                    native_offers = json.loads(json_text)
+                                except Exception as e:
+                                    native_offers = [{"debug_error": "json_parse_failed: " + str(e)}]
                             else:
-                                native_offers = [{"debug_error": "js_result_did_not_contain_NEXT_DATA: " + js_str[:200]}]
+                                native_offers = [{"debug_error": "js_result_did_not_contain_json: " + js_str[:200]}]
                         else:
                             native_offers = [{"debug_error": "js_execution_result_is_none"}]
                             
