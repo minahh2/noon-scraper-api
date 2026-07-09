@@ -42,6 +42,7 @@ browser_config = BrowserConfig(
         "--js-flags=--max-old-space-size=512",
         "--blink-settings=imagesEnabled=false", 
         "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
         f"--host-rules={tracker_blackhole}"
     ]
 )
@@ -275,7 +276,8 @@ def scrape():
         exclude_external_links=True,
         exclude_social_media_links=True,
         exclude_external_images=True,
-        word_count_threshold=10
+        word_count_threshold=10,
+        magic=True
     )
 
     async def run_scraper():
