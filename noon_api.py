@@ -162,9 +162,21 @@ def scrape():
     return new Promise((resolve) => {
         (async function() {
             try {
+                // Block all client-side and server-side navigations
+                history.pushState = function() {};
+                history.replaceState = function() {};
+                window.onbeforeunload = function() { return false; };
+                window.addEventListener('click', e => {
+                    let a = e.target.closest('a');
+                    if (a && a.href && !a.href.includes('?o=')) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                }, true);
+
                 let mainLoaded = false;
                 for (let i = 0; i < 40; i++) { 
-                    if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"], [class*="productTitle"]')) {
+                    if (document.querySelector('[data-qa="product-name"], h1, [class*="ProductTitle"]')) {
                         mainLoaded = true;
                         break;
                     }
@@ -186,15 +198,14 @@ def scrape():
                     for (let i = 0; i < allElements.length; i++) {
                         let el = allElements[i];
                         if (el.children.length === 0) {
-                            let rawText = el.textContent || el.innerText || "";
-                            let text = rawText.trim().toLowerCase();
+                            let text = (el.textContent || el.innerText || "").trim().toLowerCase();
                             if (text.length > 0 && (
-                                text.includes("offers from") || 
                                 text.includes("other sellers") || 
-                                text.includes("\\u0639\\u0631\\u0648\\u0636") || 
-                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646") ||
-                                text.includes("offers") && text.includes("other") ||
-                                text.includes("new from")
+                                text.includes("other offers") ||
+                                text.includes("compare offers") ||
+                                text === "view more sellers" ||
+                                text.includes("\\u0628\\u0627\\u0626\\u0639\\u064a\\u0646 \\u0622\\u062e\\u0631\\u064a\\u0646") ||
+                                text.includes("\\u0639\\u0631\\u0648\\u0636 \\u0623\\u062e\\u0631\\u0649")
                             )) {
                                 btn = el.closest('button') || el.closest('a') || el.parentElement || el;
                                 break;
@@ -211,15 +222,12 @@ def scrape():
                     await new Promise(r => setTimeout(r, 1000)); 
                     
                     if (btn.hasAttribute('href')) btn.removeAttribute('href');
-                    
                     let initialChildren = document.body.children.length;
                     
-                    // Fire native events
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     btn.click();
                     
-                    // React fiber bypass
                     let reactKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
                     if (reactKey && btn[reactKey] && btn[reactKey].onClick) {
                         try { btn[reactKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: btn, currentTarget: btn }); } catch (e) {}
@@ -235,16 +243,13 @@ def scrape():
                         parent = parent.parentElement;
                     }
                     
-                    // Wait for drawer to open
                     await new Promise(r => setTimeout(r, 3000));
                     
-                    // Let's dump whatever new dialog or drawer opened!
                     let newHtml = "NO_NEW_ELEMENTS";
                     if (document.body.children.length > initialChildren) {
                         let newEl = document.body.children[document.body.children.length - 1];
                         newHtml = newEl.outerHTML;
                     } else {
-                        // Look for a dialog or overlay explicitly
                         let dialog = document.querySelector('[role="dialog"], [class*="dialog"], [class*="modal"], [class*="drawer"]');
                         if (dialog) newHtml = dialog.outerHTML;
                     }
