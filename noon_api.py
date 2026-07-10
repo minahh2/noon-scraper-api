@@ -220,6 +220,8 @@ def scrape():
         delay_before_return_html=0.5, # Our JS handles the waiting, no need to blindly delay!
         excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
         remove_overlay_elements=False,
+        exclude_external_links=True,
+        exclude_social_media_links=True,
         exclude_external_images=True,
         word_count_threshold=10,
         magic=False # Disabled slow human simulations; rely on session_id for speed.
