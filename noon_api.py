@@ -227,30 +227,33 @@ def scrape():
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     btn.click();
                     
-                    let reactKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-                    if (reactKey && btn[reactKey] && btn[reactKey].onClick) {
-                        try { btn[reactKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: btn, currentTarget: btn }); } catch (e) {}
-                    }
-                    
-                    let parent = btn.parentElement;
-                    while (parent && parent !== document.body) {
-                        let pKey = Object.keys(parent).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-                        if (pKey && parent[pKey] && parent[pKey].onClick) {
-                            try { parent[pKey].onClick({ preventDefault: () => {}, stopPropagation: () => {}, target: parent, currentTarget: parent }); } catch (e) {}
-                            break;
+                    // React 17/18 Fiber Trick
+                    let fiberKey = Object.keys(btn).find(k => k.startsWith('__reactFiber$'));
+                    if (fiberKey) {
+                        let fiber = btn[fiberKey];
+                        while (fiber) {
+                            if (fiber.memoizedProps && typeof fiber.memoizedProps.onClick === 'function') {
+                                try {
+                                    fiber.memoizedProps.onClick({
+                                        preventDefault: () => {}, 
+                                        stopPropagation: () => {}, 
+                                        target: btn, 
+                                        currentTarget: btn
+                                    });
+                                } catch(e) {}
+                                break;
+                            }
+                            fiber = fiber.return;
                         }
-                        parent = parent.parentElement;
                     }
                     
                     await new Promise(r => setTimeout(r, 3000));
                     
                     let newHtml = "NO_NEW_ELEMENTS";
-                    if (document.body.children.length > initialChildren) {
-                        let newEl = document.body.children[document.body.children.length - 1];
-                        newHtml = newEl.outerHTML;
-                    } else {
-                        let dialog = document.querySelector('[role="dialog"], [class*="dialog"], [class*="modal"], [class*="drawer"]');
-                        if (dialog) newHtml = dialog.outerHTML;
+                    let portal = document.getElementById('overlay-portal') || document.body;
+                    let drawer = portal.querySelector('[class*="offersListCtr"], [class*="_container_nz0ky"], [class*="Panel"]');
+                    if (drawer) {
+                        newHtml = drawer.outerHTML;
                     }
                     
                     return resolve("|||DRAWER_HTML|||" + newHtml.substring(0, 5000) + "|||END|||");
