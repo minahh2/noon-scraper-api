@@ -63,7 +63,8 @@ return new Promise((resolve) => {
             console.log("⏳ Starting execution...");
 
             let btn = null;
-            for (let i = 0; i < 20; i++) {
+            let cartSeenCount = 0;
+            for (let i = 0; i < 30; i++) {
                 btn = Array.from(document.querySelectorAll('*')).find(el => {
                     if (!el.innerText || el.children.length > 0) return false;
                     let text = el.innerText.trim().toLowerCase();
@@ -76,6 +77,23 @@ return new Promise((resolve) => {
                     btn = document.querySelector('[class*="slidingOptionsTrigger"]');
                 }
                 if (btn) break;
+
+                // Early exit optimization for single-seller/out-of-stock
+                let isPageLoaded = document.querySelector('[data-qa="pdp-add-to-cart-revamp"]') || 
+                                   Array.from(document.querySelectorAll('*')).some(el => {
+                                       if(!el.innerText || el.children.length > 0) return false;
+                                       let t = el.innerText.trim().toLowerCase();
+                                       return t.includes('add to cart') || t.includes('out of stock') || t.includes('إضافة إلى العربة') || t.includes('نفذت الكمية');
+                                   });
+                if (isPageLoaded) {
+                    cartSeenCount++;
+                    // If main elements are loaded for 500ms and no offers button, break early!
+                    if (cartSeenCount > 5) {
+                        console.log("⚡ Fast-exit: Core page loaded, no other offers button detected.");
+                        break;
+                    }
+                }
+                
                 await new Promise(r => setTimeout(r, 100));
             }
 
@@ -199,18 +217,15 @@ def scrape():
         session_id=_current_session_id,
         extraction_strategy=extraction_strategy,
         js_code=[JS_CLICK_SCRIPT],
-        delay_before_return_html=2.5, 
+        delay_before_return_html=0.5, # Our JS handles the waiting, no need to blindly delay!
         excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
         remove_overlay_elements=False,
-        exclude_external_links=True,
-        exclude_social_media_links=True,
         exclude_external_images=True,
         word_count_threshold=10,
-        magic=True
+        magic=False # Disabled slow human simulations; rely on session_id for speed.
     )
 
     async def run_scraper():
-        from bs4 import BeautifulSoup
         async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
             results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
             
@@ -219,31 +234,19 @@ def scrape():
                 if result.success:
                     try:
                         extracted = json.loads(result.extracted_content)
-                        js_res = getattr(result, "js_execution_result", None)
-                        js_debug = str(js_res)[:500] if js_res else "js_execution_result_is_none"
-                            
-                        if isinstance(extracted, list) and len(extracted) > 0:
-                            extracted[0]["js_debug"] = js_debug
-                        elif isinstance(extracted, dict) and "data" in extracted and len(extracted["data"]) > 0:
-                            extracted["data"][0]["js_debug"] = js_debug
-                        elif isinstance(extracted, dict) and "original" not in extracted:
-                            extracted["js_debug"] = js_debug
-                            
                     except Exception as e:
                         extracted = {"error": "Failed to parse content: " + str(e)}
                     
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "data": extracted,
-                        "html_preview": result.html[:500] if result.html else "NO HTML"
+                        "data": extracted
                     })
                 else:
                     output.append({
                         "url": result.url, 
                         "status": result.status_code, 
-                        "error": result.error_message,
-                        "html_preview": result.html[:500] if result.html else "NO HTML"
+                        "error": result.error_message
                     })
             return output
 
