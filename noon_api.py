@@ -1,205 +1,107 @@
-import json
-import asyncio
 from flask import Flask, request, jsonify
-from crawl4ai import (
-    AsyncWebCrawler,
-    CrawlerRunConfig,
-    JsonCssExtractionStrategy,
-    BrowserConfig,
-    CacheMode
-)
+from curl_cffi import requests
+from bs4 import BeautifulSoup
+import time
+import logging
+import json
 
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-tracker_blackhole = (
-    "MAP *.google-analytics.com 127.0.0.1, "
-    "MAP *.googletagmanager.com 127.0.0.1, "
-    "MAP *.doubleclick.net 127.0.0.1, "  
-    "MAP *.facebook.net 127.0.0.1, "
-    "MAP *.facebook.com 127.0.0.1, "
-    "MAP *.criteo.com 127.0.0.1, "
-    "MAP *.criteo.net 127.0.0.1, "
-    "MAP *.tiktok.com 127.0.0.1, "
-    "MAP *.snapchat.com 127.0.0.1, "
-    "MAP *.hotjar.com 127.0.0.1, "
-    "MAP *.clarity.ms 127.0.0.1"
-)
+def extract_data(soup, schema):
+    result = {}
+    for field in schema.get('fields', []):
+        if field.get('type') == 'text':
+            elements = soup.select(field.get('selector', ''))
+            if elements:
+                result[field['name']] = elements[0].get_text(strip=True)
+            else:
+                result[field['name']] = None
+        elif field.get('type') == 'list':
+            list_results = []
+            elements = soup.select(field.get('selector', ''))
+            for element in elements:
+                item_data = {}
+                for subfield in field.get('fields', []):
+                    sub_elements = element.select(subfield.get('selector', ''))
+                    if sub_elements:
+                        item_data[subfield['name']] = sub_elements[0].get_text(strip=True)
+                    else:
+                        item_data[subfield['name']] = None
+                list_results.append(item_data)
+            result[field['name']] = list_results
+    return result
 
-browser_config = BrowserConfig(
-    headless=True,
-    viewport_width=1920,
-    viewport_height=1080,
-    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    user_data_dir="/app/chrome_cache",
-    use_persistent_context=True,
-    extra_args=[
-        "--no-sandbox", 
-        "--disable-gpu", 
-        "--disable-extensions",
-        "--disable-dev-shm-usage", 
-        "--js-flags=--max-old-space-size=512",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--disable-blink-features=AutomationControlled",
-        f"--host-rules={tracker_blackhole}"
-    ]
-)
+import re
 
-JS_CLICK_SCRIPT = """
-return new Promise((resolve) => {
-    (async () => {
-        try {
-            // Block all client-side and server-side navigations to prevent React from soft-reloading the page
-            history.pushState = function() {};
-            history.replaceState = function() {};
-            window.onbeforeunload = function() { return false; };
-            window.addEventListener('click', e => {
-                let a = e.target.closest('a');
-                if (a && a.href && !a.href.includes('?o=')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }, true);
-
-            console.log("⏳ Starting execution...");
-
-            let btn = null;
-            let cartSeenCount = 0;
-            for (let i = 0; i < 30; i++) {
-                btn = Array.from(document.querySelectorAll('*')).find(el => {
-                    if (!el.innerText || el.children.length > 0) return false;
-                    let text = el.innerText.trim().toLowerCase();
-                    return text.includes('offers from') ||
-                        text.includes('other sellers') ||
-                        text.includes('عروض أكثر من بائعين آخرين') ||
-                        text.includes('عروض أخرى');
-                });
-                if (!btn) {
-                    btn = document.querySelector('[class*="slidingOptionsTrigger"]');
-                }
-                if (btn) break;
-
-                // Early exit optimization for single-seller/out-of-stock
-                let isPageLoaded = document.querySelector('[data-qa="pdp-add-to-cart-revamp"]') || 
-                                   Array.from(document.querySelectorAll('*')).some(el => {
-                                       if(!el.innerText || el.children.length > 0) return false;
-                                       let t = el.innerText.trim().toLowerCase();
-                                       return t.includes('add to cart') || t.includes('out of stock') || t.includes('إضافة إلى العربة') || t.includes('نفذت الكمية');
-                                   });
-                if (isPageLoaded) {
-                    cartSeenCount++;
-                    // If main elements are loaded for 500ms and no offers button, break early!
-                    if (cartSeenCount > 5) {
-                        console.log("⚡ Fast-exit: Core page loaded, no other offers button detected.");
-                        break;
-                    }
-                }
+def extract_sellers_from_state(html_text, extracted_data):
+    # Regex parser to find all sellers hidden in Noon's Javascript RSC payload
+    matches = list(re.finditer(r'store_name:\s*\"([^\"]+)\"', html_text))
+    
+    sellers_found = []
+    seen_sellers = set()
+    
+    # The first seller in the page is usually the recommended seller.
+    # We will grab all of them anyway.
+    for m in matches:
+        name = m.group(1).strip()
+        if not name or name in seen_sellers:
+            continue
+            
+        idx = m.start()
+        # Look behind the store_name string to find the price, and ahead to find the rating
+        context = html_text[max(0, idx-2000):idx+1000]
+        
+        # Extract Price (usually before store_name)
+        price_matches = list(re.finditer(r'price:\s*([\d\.]+)', context))
+        if price_matches:
+            price = price_matches[-1].group(1)
+        else:
+            sale_matches = list(re.finditer(r'sale_price:\s*([\d\.]+)', context))
+            if sale_matches:
+                price = sale_matches[-1].group(1)
+            else:
+                price = 'Unknown'
                 
-                await new Promise(r => setTimeout(r, 100));
-            }
-
-            if (!btn) {
-                console.warn("⚠️ Button not detected. Product might be single-seller.");
-                resolve(true);
-                return;
-            }
-
-            const target = btn.parentElement || btn;
-            console.log("🎯 Targeting element:", target);
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            await new Promise(r => setTimeout(r, 1000));
-
-            const eventOpts = { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: 'mouse' };
-            target.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
-            target.dispatchEvent(new MouseEvent('mousedown', eventOpts));
-            target.dispatchEvent(new PointerEvent('pointerup', eventOpts));
-            target.dispatchEvent(new MouseEvent('mouseup', eventOpts));
-            target.dispatchEvent(new MouseEvent('click', eventOpts));
+        # Format price with EGP
+        if price != 'Unknown':
+            price = f"EGP {price}"
             
-            let fiberKey = Object.keys(target).find(k => k.startsWith('__reactFiber$'));
-            if (fiberKey) {
-                let fiber = target[fiberKey];
-                let found = false;
-                while (fiber && !found) {
-                    if (fiber.memoizedProps) {
-                        ['onClick', 'onPointerDown', 'onMouseDown'].forEach(h => {
-                            if (typeof fiber.memoizedProps[h] === 'function') {
-                                try {
-                                    fiber.memoizedProps[h]({ preventDefault: () => {}, stopPropagation: () => {}, target: target, currentTarget: target });
-                                    found = true;
-                                } catch(e) {}
-                            }
-                        });
-                    }
-                    fiber = fiber.return;
-                }
-            }
-
-            console.log("⏳ Checking for loaded offers...");
-            for (let i = 0; i < 15; i++) {
-                const cards = document.querySelectorAll('a[class*="_card_"][href*="?o="]');
-                if (cards.length > 0) {
-                    console.log(`🎉 SUCCESS: ${cards.length} offers loaded visually.`);
-                    setTimeout(() => resolve(true), 800);
-                    return;
-                }
-                await new Promise(r => setTimeout(r, 500));
-            }
+        # Extract Rating (usually after store_name)
+        rating_match = re.search(r'partner_rating:\s*([\d\.]+)', context)
+        rating = rating_match.group(1) if rating_match else 'N/A'
+        
+        sellers_found.append({
+            "seller_name": name,
+            "price": price,
+            "rating": rating
+        })
+        seen_sellers.add(name)
+        
+    if sellers_found:
+        main_seller = extracted_data.get('recommended_seller_name', '')
+        
+        # Patch the recommended_seller_rating if we found it in the RSC state
+        if main_seller:
+            for s in sellers_found:
+                if s['seller_name'] == main_seller and s['rating'] != 'N/A':
+                    extracted_data['recommended_seller_rating'] = s['rating']
+                    break
+        
+        # Filter out the main recommended seller from the "other_offers" list to avoid duplication
+        if main_seller:
+            sellers_found = [s for s in sellers_found if s['seller_name'] != main_seller]
             
-            console.log("🏁 Visual drawer failed, injecting LD+JSON fallback...");
-            let ldJson = Array.from(document.querySelectorAll('script[type="application/ld+json"]')).find(s => s.innerText.includes('"offers"'));
-            if (ldJson) {
-                try {
-                    let data = JSON.parse(ldJson.innerText);
-                    let offers = data.offers;
-                    if (Array.isArray(offers) && offers.length > 0) {
-                        let html = '<div id="injected-offers-drawer" class="_container_nz0ky offersListCtr">';
-                        offers.forEach(o => {
-                            let sName = o.seller ? o.seller.name : 'Unknown';
-                            let oPrice = o.price || '';
-                            html += '<a class="_card_" href="?o=fallback">' + 
-                                '<div class="_sellerName_">' + sName + '</div>' + 
-                                '<div class="_sellingPrice_"><strong>' + oPrice + '</strong></div>' + 
-                                '<div class="_textValue_">N/A</div>' + 
-                            '</a>';
-                        });
-                        html += '</div>';
-                        document.body.insertAdjacentHTML('beforeend', html);
-                        console.log("🎉 SUCCESS: Injected " + offers.length + " cards via LD+JSON.");
-                        resolve(true);
-                        return;
-                    }
-                } catch(e) {}
-            }
-
-            console.log("❌ Both visual and LD+JSON fallbacks failed.");
-            resolve(true);
-
-        } catch (error) {
-            console.error("❌ Exception caught:", error);
-            resolve(true);
-        }
-    })();
-});
-"""
-
-import time
-
-# Global state for intelligent session batching
-_scrape_counter = 0
-_current_session_id = f"noon_session_{int(time.time())}"
+        extracted_data['other_offers'] = sellers_found
+        logging.info(f"Successfully extracted {len(sellers_found)} other sellers directly from RSC state!")
+        
+    return extracted_data
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
-    global _scrape_counter, _current_session_id
+    start_time = time.time()
     
-    _scrape_counter += 1
-    if _scrape_counter > 50:
-        _scrape_counter = 1
-        _current_session_id = f"noon_session_{int(time.time())}"
-        print(f"🔄 Rotating Session ID: {_current_session_id}")
-        
     data = request.get_json()
-    
     if not data:
          return jsonify({"error": "No JSON payload received"}), 400
          
@@ -209,57 +111,56 @@ def scrape():
     if not isinstance(urls, list) or not isinstance(schema, dict):
         return jsonify({"error": "Invalid input. 'urls' must be a list, 'schema' must be a dict."}), 400
 
-    extraction_strategy = JsonCssExtractionStrategy(schema, verbose=False)
-    buy_box_wait_selector = '[data-qa="pdp-add-to-cart-revamp"]'
-
-    config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        session_id=_current_session_id,
-        extraction_strategy=extraction_strategy,
-        js_code=[JS_CLICK_SCRIPT],
-        delay_before_return_html=0.5, # Our JS handles the waiting, no need to blindly delay!
-        excluded_tags=['nav', 'footer', 'header', 'style', 'noscript'],
-        remove_overlay_elements=False,
-        exclude_external_links=True,
-        exclude_social_media_links=True,
-        exclude_external_images=True,
-        word_count_threshold=10,
-        magic=False # Disabled slow human simulations; rely on session_id for speed.
-    )
-
-    async def run_scraper():
-        async with AsyncWebCrawler(config=browser_config, verbose=False) as crawler:
-            results = await crawler.arun_many(urls=urls, config=config, semaphore_count=3)
+    results = []
+    
+    # We will reuse the same session to keep connection pooling alive
+    session = requests.Session(impersonate="chrome120")
+    
+    for url in urls:
+        url_start_time = time.time()
+        try:
+            # 1. Fetch the raw HTML using curl_cffi (Bypasses Anti-Bot)
+            res = session.get(
+                url, 
+                timeout=15,
+                headers={
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                }
+            )
+            html_fetch_time = time.time() - url_start_time
             
-            output = []
-            for result in results:
-                if result.success:
-                    try:
-                        extracted = json.loads(result.extracted_content)
-                    except Exception as e:
-                        extracted = {"error": "Failed to parse content: " + str(e)}
-                    
-                    output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "data": extracted
-                    })
-                else:
-                    output.append({
-                        "url": result.url, 
-                        "status": result.status_code, 
-                        "error": result.error_message
-                    })
-            return output
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'lxml')
+                
+                # 2. Extract standard fields via CSS Selectors
+                extracted = extract_data(soup, schema)
+                
+                # 3. Inject the other offers directly from the React Server Component JS state!
+                extracted = extract_sellers_from_state(res.text, extracted)
+                
+                results.append({
+                    "url": url, 
+                    "status": res.status_code, 
+                    "data": extracted
+                })
+            else:
+                results.append({
+                    "url": url, 
+                    "status": res.status_code, 
+                    "error": f"HTTP Error {res.status_code}"
+                })
+                
+        except Exception as e:
+            results.append({
+                "url": url, 
+                "status": 500, 
+                "error": str(e)
+            })
 
-    # --- THE CLEAN EXECUTION FIX ---
-    try:
-        result = asyncio.run(run_scraper())
-        return jsonify(result) 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(results)
 
 if __name__ == '__main__':
     from waitress import serve
-    print("Starting Noon production server with Waitress (Max 4 threads)...")
-    serve(app, host='0.0.0.0', port=5000, threads=4)
+    print("Starting Noon CFFI production server with Waitress (Max 8 threads)...")
+    serve(app, host='0.0.0.0', port=5000, threads=8)
