@@ -4,3 +4,4 @@ playwright
 waitress
 playwright-stealth
 beautifulsoup4
+curl-cffi
